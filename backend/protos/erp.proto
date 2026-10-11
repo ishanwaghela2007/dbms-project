@@ -1,0 +1,90 @@
+syntax = "proto3";
+package collegeerp.v1;
+
+// JSON envelopes keep this starter easy to extend while services remain separated
+// by named RPCs. Replace with strongly typed messages as API contracts stabilize.
+message JsonRequest { string payloadJson = 1; }
+message JsonResponse { string payloadJson = 1; }
+
+service AuthService {
+  rpc Login(JsonRequest) returns (JsonResponse);
+  rpc GetAuthorization(JsonRequest) returns (JsonResponse);
+  rpc CreateUser(JsonRequest) returns (JsonResponse);
+  rpc UpdateUserStatus(JsonRequest) returns (JsonResponse);
+  rpc GetUser(JsonRequest) returns (JsonResponse);
+  rpc AcceptInvitation(JsonRequest) returns (JsonResponse);
+  rpc ForgotPassword(JsonRequest) returns (JsonResponse);
+  rpc ResetPassword(JsonRequest) returns (JsonResponse);
+  rpc ChangePassword(JsonRequest) returns (JsonResponse);
+}
+service ProfileService {
+  rpc GetMyProfile(JsonRequest) returns (JsonResponse);
+  rpc UpdateMyProfile(JsonRequest) returns (JsonResponse);
+  rpc ListStudents(JsonRequest) returns (JsonResponse);
+  rpc GetStudent(JsonRequest) returns (JsonResponse);
+  rpc CreateStudent(JsonRequest) returns (JsonResponse);
+  rpc UpdateStudent(JsonRequest) returns (JsonResponse);
+  rpc ListTeachers(JsonRequest) returns (JsonResponse);
+  rpc GetTeacher(JsonRequest) returns (JsonResponse);
+  rpc CreateTeacher(JsonRequest) returns (JsonResponse);
+  rpc UpdateTeacher(JsonRequest) returns (JsonResponse);
+  rpc UpdateAvatar(JsonRequest) returns (JsonResponse);
+}
+service AcademicService {
+  rpc CreateDepartment(JsonRequest) returns (JsonResponse);
+  rpc ListDepartments(JsonRequest) returns (JsonResponse);
+  rpc CreateProgram(JsonRequest) returns (JsonResponse);
+  rpc CreateAcademicYear(JsonRequest) returns (JsonResponse);
+  rpc CreateSemester(JsonRequest) returns (JsonResponse);
+  rpc CreateClassSection(JsonRequest) returns (JsonResponse);
+  rpc CreateClassSubject(JsonRequest) returns (JsonResponse);
+  rpc EnrollStudent(JsonRequest) returns (JsonResponse);
+  rpc ResolveAcademicRefs(JsonRequest) returns (JsonResponse);
+  rpc AutoEnrollStudent(JsonRequest) returns (JsonResponse);
+  rpc ResolveTeachingAssignment(JsonRequest) returns (JsonResponse);
+  rpc ListClasses(JsonRequest) returns (JsonResponse);
+  rpc ListSubjects(JsonRequest) returns (JsonResponse);
+  rpc GetClassRoster(JsonRequest) returns (JsonResponse);
+  rpc CreateSubject(JsonRequest) returns (JsonResponse);
+  rpc CreateTeachingAssignment(JsonRequest) returns (JsonResponse);
+  rpc ListTeachingAssignments(JsonRequest) returns (JsonResponse);
+}
+service MarksService {
+  rpc CreateAssessment(JsonRequest) returns (JsonResponse);
+  rpc ListAssessments(JsonRequest) returns (JsonResponse);
+  rpc GetAssessmentMarks(JsonRequest) returns (JsonResponse);
+  rpc EnterBulkMarks(JsonRequest) returns (JsonResponse);
+  rpc ValidateMarksPdf(JsonRequest) returns (JsonResponse);
+  rpc GetMarkValidation(JsonRequest) returns (JsonResponse);
+  rpc ConfirmValidatedMarks(JsonRequest) returns (JsonResponse);
+  rpc PublishResults(JsonRequest) returns (JsonResponse);
+  rpc GetStudentResults(JsonRequest) returns (JsonResponse);
+}
+service AttendanceService {
+  rpc SaveAttendanceRegister(JsonRequest) returns (JsonResponse);
+  rpc PreviewAttendanceImport(JsonRequest) returns (JsonResponse);
+  rpc CommitAttendanceImport(JsonRequest) returns (JsonResponse);
+  rpc FinalizeAttendanceSession(JsonRequest) returns (JsonResponse);
+  rpc GetLowAttendance(JsonRequest) returns (JsonResponse);
+  rpc GetStudentAttendanceSummary(JsonRequest) returns (JsonResponse);
+  rpc CreateFollowup(JsonRequest) returns (JsonResponse);
+  rpc ListFollowups(JsonRequest) returns (JsonResponse);
+  rpc PublishAvailability(JsonRequest) returns (JsonResponse);
+  rpc ListAvailableSlots(JsonRequest) returns (JsonResponse);
+  rpc RequestMeeting(JsonRequest) returns (JsonResponse);
+  rpc ListMeetings(JsonRequest) returns (JsonResponse);
+  rpc RespondToMeeting(JsonRequest) returns (JsonResponse);
+  rpc CancelMeeting(JsonRequest) returns (JsonResponse);
+}
+service PaperService {
+  rpc CreatePaper(JsonRequest) returns (JsonResponse);
+  rpc ListPapers(JsonRequest) returns (JsonResponse);
+  rpc GetPaperAccess(JsonRequest) returns (JsonResponse);
+  rpc UpdatePaper(JsonRequest) returns (JsonResponse);
+  rpc UpdateProfileAsset(JsonRequest) returns (JsonResponse);
+}
+service NotificationService {
+  rpc ListNotifications(JsonRequest) returns (JsonResponse);
+  rpc MarkNotificationRead(JsonRequest) returns (JsonResponse);
+  rpc EnqueueNotification(JsonRequest) returns (JsonResponse);
+}

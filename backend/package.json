@@ -1,0 +1,51 @@
+{
+  "name": "college-erp-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "College ERP backend starter: Express gateway, gRPC services, MySQL, Redis and Cloudinary",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n gateway,auth,profile,academic,marks,attendance,paper,notification -c blue,green,magenta,cyan,yellow,white,red,gray \"node --watch src/gateway/server.js\" \"node --watch src/services/auth/index.js\" \"node --watch src/services/profile/index.js\" \"node --watch src/services/academic/index.js\" \"node --watch src/services/marks/index.js\" \"node --watch src/services/attendance/index.js\" \"node --watch src/services/paper/index.js\" \"node --watch src/services/notification/index.js\"",
+    "start:gateway": "node src/gateway/server.js",
+    "start:auth": "node src/services/auth/index.js",
+    "start:profile": "node src/services/profile/index.js",
+    "start:academic": "node src/services/academic/index.js",
+    "start:marks": "node src/services/marks/index.js",
+    "start:attendance": "node src/services/attendance/index.js",
+    "start:paper": "node src/services/paper/index.js",
+    "start:notification": "node src/services/notification/index.js",
+    "db:migrate": "node database/migrate.js",
+    "db:seed-admin": "node database/seed-admin.js",
+    "db:seed-demo": "node database/seed-demo.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check-syntax.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.13.4",
+    "@grpc/proto-loader": "^0.7.13",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "mysql2": "^3.14.1",
+    "nodemailer": "^10.1.0",
+    "pdf-parse": "1.1.1",
+    "pino": "^9.7.0",
+    "pino-http": "^10.4.0",
+    "redis": "^5.5.6",
+    "tesseract.js": "^6.0.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
