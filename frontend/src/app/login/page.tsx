@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Eye, EyeOff, GraduationCap, ShieldCheck, Sparkles, KeyRound } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, GraduationCap, ShieldCheck, Sparkles } from "lucide-react";
 import { apiRequest } from "@/lib/api/client";
 
 export default function LoginPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
-  const [email, setEmail] = useState("admin@college.edu");
-  const [password, setPassword] = useState("AdminPassword123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -118,12 +118,6 @@ export default function LoginPage() {
     }
   }
 
-  function fillCredentials(fillEmail: string, fillPass: string) {
-    setEmail(fillEmail);
-    setPassword(fillPass);
-    setError("");
-  }
-
   if (!mounted) {
     return <main className="login-page" suppressHydrationWarning />;
   }
@@ -176,7 +170,7 @@ export default function LoginPage() {
       </section>
 
       <section className="login-form-side">
-        <form className="login-card" onSubmit={submit}>
+        <form className="login-card" onSubmit={submit} autoComplete="off">
           <div className="login-mobile-brand">
             <span className="brand-mark">
               <GraduationCap size={22} />
@@ -195,6 +189,7 @@ export default function LoginPage() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="you@college.edu"
+              autoComplete="off"
             />
           </div>
 
@@ -207,6 +202,7 @@ export default function LoginPage() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Enter your password"
+                autoComplete="off"
               />
               <button
                 type="button"
@@ -223,22 +219,6 @@ export default function LoginPage() {
             <Link href="/forgot-password" style={{ fontSize: 13, color: "#4f46e5", fontWeight: 500 }}>
               Forgot password?
             </Link>
-          </div>
-
-          <div style={{ marginTop: 14, padding: "10px 12px", background: "rgba(240, 244, 255, 0.6)", borderRadius: 8, border: "1px solid #dce4f7" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: "#455073", marginBottom: 6 }}>
-              <KeyRound size={13} /> Initial Administrator Credentials
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: 11, padding: "3px 8px" }}
-                onClick={() => fillCredentials("admin@college.edu", "AdminPassword123!")}
-              >
-                Auto-fill Admin (admin@college.edu)
-              </button>
-            </div>
           </div>
 
           {error && (
