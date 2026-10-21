@@ -41,6 +41,7 @@ export const config = {
   authzCacheTtl: Number(optionalEnv('AUTHZ_CACHE_TTL_SECONDS', '30')),
   grpcMaxMessageBytes: Number(optionalEnv('GRPC_MAX_MESSAGE_BYTES', String(16 * 1024 * 1024))),
   frontendOrigin: productionEnv('FRONTEND_ORIGIN', 'http://localhost:3000'),
+  deployedFrontendOrigin: optionalEnv('DEPLOYED_FRONTEND_ORIGIN', 'https://dbms-project-chi-three.vercel.app'),
   mysqlHost: productionEnv('MYSQL_HOST', '127.0.0.1'),
   mysqlPort: positiveIntEnv('MYSQL_PORT', 3306),
   mysqlUser: productionEnv('MYSQL_USER', 'erp_user'),

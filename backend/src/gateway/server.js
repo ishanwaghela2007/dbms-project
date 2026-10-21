@@ -22,7 +22,11 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Mat
 app.disable('x-powered-by');
 app.set('trust proxy', config.trustProxy);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: config.frontendOrigin.split(',').map(x => x.trim()), credentials: true, methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Idempotency-Key'] }));
+const allowedFrontendOrigins = [...new Set([
+  ...config.frontendOrigin.split(',').map((origin) => origin.trim()).filter(Boolean),
+  config.deployedFrontendOrigin.trim(),
+])];
+app.use(cors({ origin: allowedFrontendOrigins, credentials: true, methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Idempotency-Key'] }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use('/api/v1/uploads', express.static(path.join(process.cwd(), 'uploads')));

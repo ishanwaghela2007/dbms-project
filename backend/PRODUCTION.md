@@ -5,7 +5,9 @@ Before deployment, configure these values in the deployment platform's secret ma
 - `NODE_ENV=production`
 - `JWT_SECRET` - long, unique random secret
 - `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`
-- `FRONTEND_ORIGIN` and `FRONTEND_BASE_URL` - HTTPS public frontend URL
+- `FRONTEND_ORIGIN` - comma-separated HTTPS frontend origins allowed to call the API
+- `DEPLOYED_FRONTEND_ORIGIN` - optional additional deployed frontend origin; defaults to the current Vercel deployment URL
+- `FRONTEND_BASE_URL` - HTTPS public frontend URL used in generated links
 - `TRUST_PROXY` - the trusted reverse-proxy setting, for example `loopback` when the gateway is only reached through a local proxy
 - `REQUIRE_HTTPS=true`
 - `COOKIE_CONSENT_RETENTION_DAYS` - maximum consent-log retention period; defaults to 90 days
