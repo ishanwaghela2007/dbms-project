@@ -4,17 +4,14 @@ import { useEffect, useState } from "react";
 import { CalendarClock, CheckCircle2, Clock3, MapPin, MessageSquare, XCircle } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
-import { isDemoMode } from "@/lib/api/client";
-import { studentMeetings as seedMeetings } from "@/lib/data/demo";
 import type { Meeting } from "@/types/erp";
 
 export default function TeacherMeetingsPage() {
-  const [meetings, setMeetings] = useState<Meeting[]>(isDemoMode ? seedMeetings : []);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [responses, setResponses] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     erpApi.listTeacherMeetings().then(data => { if (active) setMeetings(data); }).catch(error => { if (active) setNotice(error instanceof Error ? error.message : "Could not load meeting requests."); });
     return () => { active = false; };

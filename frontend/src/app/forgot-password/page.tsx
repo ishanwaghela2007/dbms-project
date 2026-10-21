@@ -1,16 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { ArrowRight, GraduationCap, KeyRound, Mail } from "lucide-react";
 import { erpApi } from "@/lib/api/erp";
 
 export default function ForgotPasswordPage() {
+  const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -28,8 +33,12 @@ export default function ForgotPasswordPage() {
     }
   }
 
+  if (!mounted) {
+    return <main className="login-page" suppressHydrationWarning />;
+  }
+
   return (
-    <main className="login-page">
+    <main className="login-page" suppressHydrationWarning>
       <section className="login-story">
         <Link href="/login" className="brand-lockup">
           <span className="brand-mark">

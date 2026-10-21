@@ -12,6 +12,7 @@ export interface Student {
   semester: string;
   division: string;
   attendance: number;
+  attendanceSessions?: number;
   status: "Active" | "Inactive";
   avatar?: string;
 }

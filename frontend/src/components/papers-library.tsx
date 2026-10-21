@@ -4,12 +4,10 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Download, FileText, Filter, LockKeyhole, Plus, Search, UploadCloud, X } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
-import { papers as seedPapers } from "@/lib/data/demo";
 import type { Paper } from "@/types/erp";
-import { isDemoMode } from "@/lib/api/client";
 
 export default function PapersLibrary({ scope }: { scope: "admin" | "teacher" | "student" }) {
-  const [items, setItems] = useState<Paper[]>(isDemoMode ? seedPapers : []);
+  const [items, setItems] = useState<Paper[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All categories");
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -21,7 +19,6 @@ export default function PapersLibrary({ scope }: { scope: "admin" | "teacher" | 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     erpApi.listPapers().then(data => { if (active) setItems(data); }).catch(error => { if (active) setMessage(error instanceof Error ? error.message : "Could not load papers."); });
     return () => { active = false; };
@@ -38,7 +35,6 @@ export default function PapersLibrary({ scope }: { scope: "admin" | "teacher" | 
       const form = new FormData(); form.append("file", file); form.append("title", title || file.name.replace(/\.pdf$/i, "")); form.append("subject", subject); form.append("category", paperCategory); form.append("access", access);
       const response = await erpApi.uploadPaper(form);
       if (response.paper) setItems(current => [response.paper!, ...current]);
-      else if (isDemoMode) setItems(current => [{ id: `paper-${Date.now()}`, title: title || file.name.replace(/\.pdf$/i, ""), subject, semester: "Semester 3", academicYear: "2026–27", category: paperCategory, uploadedBy: scope === "admin" ? "Administrator" : "Current teacher", uploadedAt: new Date().toISOString().slice(0, 10), fileName: file.name, access }, ...current]);
       setMessage(response.message); setUploadOpen(false); setFile(null); setTitle("");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Upload failed."); }
     finally { setBusy(false); }
@@ -46,7 +42,6 @@ export default function PapersLibrary({ scope }: { scope: "admin" | "teacher" | 
 
   async function openPaper(paper: Paper) {
     setMessage("");
-    if (isDemoMode) { setMessage(`Demo mode: ${paper.fileName} is a sample asset. Connect the backend to obtain an authorized Cloudinary delivery URL.`); return; }
     try {
       const result = await fetch(`${(process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000/api/v1").replace(/\/$/, "")}/papers/${encodeURIComponent(paper.id)}/access`, { credentials: "include", headers: { Authorization: `Bearer ${window.localStorage.getItem("college_erp_access_token") ?? ""}` } });
       if (!result.ok) throw new Error("You do not have permission to access this paper.");

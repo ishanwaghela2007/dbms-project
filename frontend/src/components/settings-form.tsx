@@ -1,16 +1,12 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- The image preview uses a browser object URL before upload. */
 
 import { useEffect, useRef, useState } from "react";
 import { Bell, Camera, CheckCircle2, Eye, EyeOff, KeyRound, Lock, ShieldCheck, UserRound, Wifi } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
 
-const CLOUDINARY_CLOUD = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "ka5vsref";
-
-function cloudinaryAvatarUrl(publicId: string | undefined) {
-  if (!publicId || publicId.startsWith("local:")) return undefined;
-  return `https://res.cloudinary.com/${CLOUDINARY_CLOUD}/image/authenticated/${publicId}`;
-}
+import { getAvatarUrl } from "@/lib/utils/avatar";
 
 export default function SettingsForm({ role }: { role: "admin" | "teacher" | "student" }) {
   const roleLabel = role === "student" ? "Student" : role === "teacher" ? "Faculty member" : "Administrator";
@@ -47,8 +43,10 @@ export default function SettingsForm({ role }: { role: "admin" | "teacher" | "st
       const stored = window.localStorage.getItem("college_erp_user");
       if (stored) {
         const u = JSON.parse(stored);
-        if (u.fullName) setName(u.fullName);
-        if (u.email) setEmail(u.email);
+        queueMicrotask(() => {
+          if (u.fullName) setName(u.fullName);
+          if (u.email) setEmail(u.email);
+        });
       }
     } catch {}
 
@@ -63,7 +61,7 @@ export default function SettingsForm({ role }: { role: "admin" | "teacher" | "st
       if (typeof d.office_location === "string") setOfficeLocation(d.office_location as string);
       if (typeof d.specialization === "string") setSpecialization(d.specialization as string);
       if (typeof d.avatar_public_id === "string") {
-        const url = cloudinaryAvatarUrl(d.avatar_public_id as string);
+        const url = getAvatarUrl(d.avatar_public_id as string);
         if (url) setAvatarUrl(url);
       }
     }).catch(() => {});
@@ -79,14 +77,16 @@ export default function SettingsForm({ role }: { role: "admin" | "teacher" | "st
       if (role === "teacher" && specialization) payload.specialization = specialization;
       const updated = await erpApi.updateMyProfile(payload);
       const d = updated as Record<string, unknown>;
-      // Update localStorage with fresh name
+      // Update localStorage with fresh name + preserve avatarUrl
       try {
         const stored = window.localStorage.getItem("college_erp_user");
         const current = stored ? JSON.parse(stored) : {};
-        window.localStorage.setItem("college_erp_user", JSON.stringify({ ...current, fullName: name, email }));
+        window.localStorage.setItem("college_erp_user", JSON.stringify({ ...current, fullName: name, email, avatarUrl }));
       } catch {}
       if (typeof d.full_name === "string") setName(d.full_name);
       setProfileMessage("Profile updated successfully.");
+      // Pass avatarUrl so portal shell doesn't lose the current avatar
+      window.dispatchEvent(new CustomEvent("college_erp_profile_updated", { detail: { avatarUrl } }));
     } catch (e) {
       setProfileError(e instanceof Error ? e.message : "Failed to save profile.");
     } finally {
@@ -100,15 +100,39 @@ export default function SettingsForm({ role }: { role: "admin" | "teacher" | "st
     if (!file.type.startsWith("image/")) { setAvatarMsg("Please choose an image file."); return; }
     if (file.size > 5 * 1024 * 1024) { setAvatarMsg("Image must be 5 MB or smaller."); return; }
     setAvatarBusy(true); setAvatarMsg("");
+    // Immediate local preview while uploading
+    const localPreview = URL.createObjectURL(file);
+    setAvatarUrl(localPreview);
     try {
       const form = new FormData();
       form.append("file", file);
-      await erpApi.uploadAvatar(form);
-      // Preview the image locally while Cloudinary processes
-      setAvatarUrl(URL.createObjectURL(file));
+      const res = (await erpApi.uploadAvatar(form)) as {
+        avatarUrl?: string;
+        avatarPublicId?: string;
+        cloudinaryPublicId?: string;
+        mediaAssetId?: string;
+      };
+      const finalUrl = res.avatarUrl || getAvatarUrl(res.avatarPublicId || res.cloudinaryPublicId) || localPreview;
+      setAvatarUrl(finalUrl);
+      try {
+        const stored = window.localStorage.getItem("college_erp_user");
+        const current = stored ? JSON.parse(stored) : {};
+        window.localStorage.setItem(
+          "college_erp_user",
+          JSON.stringify({
+            ...current,
+            avatarUrl: finalUrl,
+            avatar_public_id: res.avatarPublicId || res.cloudinaryPublicId,
+          })
+        );
+      } catch {}
+      // Pass avatarUrl directly in event detail so portal shell updates immediately
+      window.dispatchEvent(new CustomEvent("college_erp_profile_updated", { detail: { avatarUrl: finalUrl } }));
       setAvatarMsg("Profile picture updated successfully!");
     } catch (e) {
       setAvatarMsg(e instanceof Error ? e.message : "Avatar upload failed.");
+      // Revert preview on error
+      setAvatarUrl(prev => prev === localPreview ? undefined : prev);
     } finally {
       setAvatarBusy(false);
     }

@@ -8,18 +8,19 @@ async function getTransporter() {
   if (transporter) return transporter;
 
   const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
+  const port = Number(process.env.SMTP_PORT || 465);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
+  const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465;
 
   if (host && user && pass) {
     transporter = nodemailer.createTransport({
       host,
       port,
-      secure: port === 465,
+      secure,
       auth: { user, pass },
     });
-    logger.info({ host, port, user }, 'Nodemailer configured with external SMTP');
+    logger.info({ host, port, user, secure }, 'Nodemailer configured with external SMTP');
   } else {
     // Development fallback: stream transport that logs full emails + stores in recentEmails
     transporter = nodemailer.createTransport({
@@ -35,7 +36,7 @@ async function getTransporter() {
 export async function sendMail({ to, subject, html, text }) {
   try {
     const transport = await getTransporter();
-    const from = process.env.SMTP_FROM || '"CampusFlow ERP" <no-reply@college.edu>';
+    const from = process.env.SMTP_FROM || (process.env.SMTP_USER ? `"CampusFlow ERP" <${process.env.SMTP_USER}>` : '"CampusFlow ERP" <no-reply@college.edu>');
 
     const info = await transport.sendMail({
       from,
@@ -86,6 +87,35 @@ export async function sendForgotPasswordMail({ to, fullName, resetUrl }) {
       </p>
       <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 14px;">
         This link expires in <strong>1 hour</strong>. If you did not request a password reset, you can safely ignore this email; your password remains unchanged.
+      </p>
+    </div>
+  `;
+  return sendMail({ to, subject, html });
+}
+
+export async function sendVerificationMail({ to, fullName, verifyUrl }) {
+  const subject = 'CampusFlow ERP - Verify Your Email Address';
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+      <div style="border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px;">
+        <h2 style="color: #1e1b4b; margin: 0; font-size: 22px;">CampusFlow ERP</h2>
+        <span style="color: #6366f1; font-size: 12px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em;">Email Verification</span>
+      </div>
+      <p style="color: #334155; font-size: 15px; line-height: 1.6;">Hello <strong>${fullName || 'Campus Member'}</strong>,</p>
+      <p style="color: #334155; font-size: 15px; line-height: 1.6;">
+        Thank you for registering on CampusFlow ERP. Please verify your email address (<code>${to}</code>) to activate your account and access your academic workspace.
+      </p>
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${verifyUrl}" style="background-color: #4f46e5; color: #ffffff; padding: 12px 28px; font-size: 15px; font-weight: 600; text-decoration: none; border-radius: 8px; display: inline-block;">
+          Verify Email & Activate Account
+        </a>
+      </div>
+      <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+        Or copy and paste this link in your browser:<br/>
+        <a href="${verifyUrl}" style="color: #4f46e5; word-break: break-all;">${verifyUrl}</a>
+      </p>
+      <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 14px;">
+        This verification link will expire in <strong>24 hours</strong>. If you did not create an account on CampusFlow ERP, you can safely ignore this email.
       </p>
     </div>
   `;

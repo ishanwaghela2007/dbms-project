@@ -4,12 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { BellRing, CalendarClock, CheckCircle2, MessageSquare, Search, Send, UsersRound } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
-import { isDemoMode } from "@/lib/api/client";
-import { followups as seedFollowups } from "@/lib/data/demo";
 import type { Followup } from "@/types/erp";
 
 export default function FollowupsDashboard({ adminView = false }: { adminView?: boolean }) {
-  const [rows, setRows] = useState<Followup[]>(isDemoMode ? seedFollowups : []);
+  const [rows, setRows] = useState<Followup[]>([]);
   const [search, setSearch] = useState("");
   const [threshold, setThreshold] = useState("75");
   const [selectedContact, setSelectedContact] = useState<Record<string, string>>({});
@@ -18,7 +16,6 @@ export default function FollowupsDashboard({ adminView = false }: { adminView?: 
   const [busyId, setBusyId] = useState("");
   const [notice, setNotice] = useState("");
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     erpApi.listFollowups().then(data => { if (active) setRows(data); }).catch(error => { if (active) setNotice(error instanceof Error ? error.message : "Could not load attendance follow-ups."); });
     return () => { active = false; };
@@ -68,7 +65,7 @@ export default function FollowupsDashboard({ adminView = false }: { adminView?: 
             <div className="field"><label>Person the student should meet</label><select value={selectedContact[row.id] ?? row.contact ?? row.teacherName} onChange={event => setSelectedContact(current => ({ ...current, [row.id]: event.target.value }))}><option value={row.teacherName}>{row.teacherName} · Subject teacher</option><option value="Class Mentor">Assigned class mentor</option><option value="Department Coordinator">Department coordinator</option></select></div>
             <div className="field"><label>Follow-up reason</label><select value={reasons[row.id] ?? "Attendance below the configured threshold"} onChange={event => setReasons(current => ({ ...current, [row.id]: event.target.value }))}><option>Attendance below the configured threshold</option><option>Attendance has dropped since last review</option><option>Student meeting requested</option><option>Review medical / approved absence</option></select></div>
           </div>
-          {!adminView && <div className="button-row" style={{ justifyContent: "flex-end", marginTop: 12 }}><Button variant="secondary" size="sm" onClick={() => setStatus(row.id, "RESOLVED", "Follow-up marked resolved in demo UI.")}>Mark resolved</Button><Button size="sm" disabled={busyId === row.id} onClick={() => void tagStudent(row)}>{busyId === row.id ? "Saving…" : <><Send size={14}/> Tag & notify student</>}</Button></div>}
+          {!adminView && <div className="button-row" style={{ justifyContent: "flex-end", marginTop: 12 }}><Button variant="secondary" size="sm" onClick={() => setStatus(row.id, "RESOLVED", "Follow-up marked resolved.")}>Mark resolved</Button><Button size="sm" disabled={busyId === row.id} onClick={() => void tagStudent(row)}>{busyId === row.id ? "Saving…" : <><Send size={14}/> Tag & notify student</>}</Button></div>}
           {row.status === "MEETING_REQUESTED" && <div className="notice notice-info" style={{ marginTop: 12 }}><CalendarClock size={16}/><div><strong>Meeting requested</strong>The student has requested a meeting. Review it in the meetings queue and confirm or propose another time.</div><Button size="sm" variant="secondary" onClick={() => setStatus(row.id, "ACKNOWLEDGED", "Meeting request opened for review.")}>Review request</Button></div>}
           {messages[row.id] && <p className="helper-text">{messages[row.id]}</p>}
         </div>)}

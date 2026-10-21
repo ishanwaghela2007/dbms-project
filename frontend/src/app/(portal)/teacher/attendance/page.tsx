@@ -5,8 +5,6 @@ import * as XLSX from "xlsx";
 import { AlertTriangle, Check, CheckCircle2, ClipboardCheck, Download, FileSpreadsheet, LoaderCircle, Search, Trash2, UploadCloud } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
-import { isDemoMode } from "@/lib/api/client";
-import { teacherClassAssignments as demoAssignments } from "@/lib/data/demo";
 import type { AttendanceStatus, Student, TeacherClassAssignment } from "@/types/erp";
 
 type RegisterStatus = AttendanceStatus | "";
@@ -29,14 +27,14 @@ function parseStatus(value: unknown): RegisterStatus {
 
 export default function TeacherAttendancePage() {
   const [activeTab, setActiveTab] = useState<"manual" | "excel">("manual");
-  const [assignments, setAssignments] = useState<TeacherClassAssignment[]>(isDemoMode ? demoAssignments : []);
-  const [className, setClassName] = useState(isDemoMode ? demoAssignments[0].className : "");
-  const [subject, setSubject] = useState(isDemoMode ? demoAssignments[0].subject : "");
+  const [assignments, setAssignments] = useState<TeacherClassAssignment[]>([]);
+  const [className, setClassName] = useState("");
+  const [subject, setSubject] = useState("");
   const [roster, setRoster] = useState<Student[]>([]);
   const selectedAssignment = assignments.find(assignment => assignment.className === className && assignment.subject === subject);
   const selectedClassId = selectedAssignment?.classId;
   const selectedSubjectId = selectedAssignment?.subjectId;
-  const [sessionDate, setSessionDate] = useState("2026-10-10");
+  const [sessionDate, setSessionDate] = useState(new Date().toISOString().slice(0, 10));
   const [lectureNo, setLectureNo] = useState("1");
   const [manualStates, setManualStates] = useState<Record<string, RegisterStatus>>({});
   const [search, setSearch] = useState("");
@@ -48,19 +46,18 @@ export default function TeacherAttendancePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     erpApi.listTeacherClassAssignments().then(data => {
       if (!active) return;
       setAssignments(data);
       if (data.length > 0) { setClassName(data[0].className); setSubject(data[0].subject); }
-      else { setClassName(""); setSubject(""); setError("No teaching assignments were returned for this account."); }
+      else { setClassName(""); setSubject(""); }
     }).catch(e => { if (active) setError(e instanceof Error ? e.message : "Could not load assigned classes."); });
     return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (!selectedClassId || !selectedSubjectId) { setRoster([]); return; }
+    if (!selectedClassId || !selectedSubjectId) { queueMicrotask(() => setRoster([])); return; }
     let active = true;
     erpApi.listTeacherClassRoster(selectedClassId, selectedSubjectId).then(data => {
       if (active) { setRoster(data); setManualStates({}); setImportRows([]); setFileName(""); }

@@ -1,17 +1,19 @@
 import mysql from 'mysql2/promise';
+import { config } from '../config/env.js';
 
 export const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || '127.0.0.1',
-  port: Number(process.env.MYSQL_PORT || 3306),
-  user: process.env.MYSQL_USER || 'erp_user',
-  password: process.env.MYSQL_PASSWORD || 'change_me',
-  database: process.env.MYSQL_DATABASE || 'college_erp',
+  host: config.mysqlHost,
+  port: config.mysqlPort,
+  user: config.mysqlUser,
+  password: config.mysqlPassword,
+  database: config.mysqlDatabase,
   waitForConnections: true,
-  connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT || 10),
+  connectionLimit: config.mysqlConnectionLimit,
   queueLimit: 0,
   timezone: 'Z',
   decimalNumbers: true,
   namedPlaceholders: true,
+  multipleStatements: false,
 });
 
 export async function withTransaction(fn) {

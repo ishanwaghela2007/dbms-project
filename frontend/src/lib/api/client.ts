@@ -1,9 +1,10 @@
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000/api/v1").replace(/\/$/, "");
+const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+const API_BASE = (configuredApiBase || (process.env.NODE_ENV === "production" ? "" : "http://localhost:4000/api/v1")).replace(/\/$/, "");
 
-export const isDemoMode = false;
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (typeof window === "undefined") throw new Error("API requests must be made from the browser.");
+  if (!API_BASE) throw new Error("NEXT_PUBLIC_API_BASE_URL must be configured for production.");
   const token = window.localStorage.getItem("college_erp_access_token");
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -26,9 +27,4 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
-}
-
-export function requireBackendMode() {
-  if (isDemoMode) return false;
-  return true;
 }

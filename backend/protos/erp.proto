@@ -16,6 +16,9 @@ service AuthService {
   rpc ForgotPassword(JsonRequest) returns (JsonResponse);
   rpc ResetPassword(JsonRequest) returns (JsonResponse);
   rpc ChangePassword(JsonRequest) returns (JsonResponse);
+  rpc Register(JsonRequest) returns (JsonResponse);
+  rpc VerifyEmail(JsonRequest) returns (JsonResponse);
+  rpc ResendVerification(JsonRequest) returns (JsonResponse);
 }
 service ProfileService {
   rpc GetMyProfile(JsonRequest) returns (JsonResponse);

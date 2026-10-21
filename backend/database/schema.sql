@@ -465,6 +465,17 @@ CREATE TABLE IF NOT EXISTS user_invitations (
   INDEX idx_invitation_user (user_id, expires_at)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS email_verifications (
+  id CHAR(36) PRIMARY KEY,
+  user_id CHAR(36) NOT NULL,
+  token_hash CHAR(64) NOT NULL UNIQUE,
+  expires_at TIMESTAMP NOT NULL,
+  used_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_verification_user (user_id, expires_at)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS user_security_audit_logs (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id CHAR(36) NOT NULL,
@@ -473,4 +484,16 @@ CREATE TABLE IF NOT EXISTS user_security_audit_logs (
   new_value VARCHAR(10) NOT NULL,
   changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_user_security_audit (user_id, changed_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS cookie_consent_logs (
+  id CHAR(36) PRIMARY KEY,
+  decision ENUM('ACCEPTED','REJECTED') NOT NULL,
+  ip_address VARCHAR(45) NOT NULL,
+  user_agent VARCHAR(1024) NULL,
+  requested_path VARCHAR(255) NULL,
+  request_id CHAR(36) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_cookie_consent_created_at (created_at),
+  INDEX idx_cookie_consent_ip (ip_address)
 ) ENGINE=InnoDB;

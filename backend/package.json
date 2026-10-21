@@ -20,6 +20,7 @@
     "db:migrate": "node database/migrate.js",
     "db:seed-admin": "node database/seed-admin.js",
     "db:seed-demo": "node database/seed-demo.js",
+    "db:clean-non-admin": "node database/seed-accounts.js",
     "test": "node --test tests/*.test.js",
     "check": "node scripts/check-syntax.js"
   },

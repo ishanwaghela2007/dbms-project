@@ -77,8 +77,14 @@ const handlers={
     const u=await actor(input.actorUserId); if(!u?.is_active||(!u.is_admin&&u.id!==input.userId)) throw forbidden('Cannot update another user profile picture');
     if(!input.cloudinaryPublicId) throw badRequest('cloudinaryPublicId required');
     const [target]=await pool.execute('SELECT account_type FROM users WHERE id=?',[input.userId]);if(!target[0])throw notFound('User not found');
-    const mediaId=randomUUID(); await pool.execute(`INSERT INTO media_assets (id,owner_user_id,category,cloudinary_public_id,resource_type,delivery_type,original_filename,mime_type,bytes_size) VALUES (?,?, 'PROFILE_IMAGE',?,'image','authenticated',?,'image/jpeg',?)`,[mediaId,input.userId,input.cloudinaryPublicId,input.originalFilename||'avatar.jpg',Number(input.bytesSize)||0]);
-    const table=target[0].account_type==='STUDENT'?'student_profiles':'faculty_profiles'; await pool.execute(`UPDATE ${table} SET avatar_public_id=? WHERE user_id=?`,[input.cloudinaryPublicId,input.userId]); return {mediaAssetId:mediaId,userId:input.userId};
+    const mediaId=randomUUID(); await pool.execute(`INSERT INTO media_assets (id,owner_user_id,category,cloudinary_public_id,resource_type,delivery_type,original_filename,mime_type,bytes_size) VALUES (?,?, 'PROFILE_IMAGE',?,'image','upload',?,'image/jpeg',?)`,[mediaId,input.userId,input.cloudinaryPublicId,input.originalFilename||'avatar.jpg',Number(input.bytesSize)||0]);
+    await pool.execute('UPDATE users SET avatar_public_id=? WHERE id=?', [input.cloudinaryPublicId, input.userId]);
+    if (target[0].account_type === 'STUDENT') {
+      await pool.execute('UPDATE student_profiles SET avatar_public_id=? WHERE user_id=?', [input.cloudinaryPublicId, input.userId]).catch(() => {});
+    } else if (target[0].account_type === 'TEACHER') {
+      await pool.execute('UPDATE faculty_profiles SET avatar_public_id=? WHERE user_id=?', [input.cloudinaryPublicId, input.userId]).catch(() => {});
+    }
+    return { mediaAssetId: mediaId, userId: input.userId, cloudinaryPublicId: input.cloudinaryPublicId };
   }
 };
 startGrpcService({name:'paper-media-service',address:process.env.PAPER_GRPC_ADDR||'127.0.0.1:50056',Service:erpProto.PaperService,handlers});

@@ -3,27 +3,38 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BookOpen, CalendarDays, Check, CirclePlus, GraduationCap, Plus, Search, UsersRound } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
-import { teachers as seedTeachers } from "@/lib/data/demo";
 import { apiRequest } from "@/lib/api/client";
 import type { Teacher } from "@/types/erp";
 
 type Assignment = { id: string; teacher: string; subject: string; className: string; semester: string; year: string; status: "Active" | "Needs review" };
 
-const seedAssignments: Assignment[] = [
-  { id: "a1", teacher: "Prof. Neha Kulkarni", subject: "Data Structures", className: "SY B.Tech CSE · A", semester: "Semester 3", year: "2026–27", status: "Active" },
-  { id: "a2", teacher: "Prof. Neha Kulkarni", subject: "Design & Analysis of Algorithms", className: "SY B.Tech CSE · A", semester: "Semester 3", year: "2026–27", status: "Active" },
-  { id: "a3", teacher: "Dr. Aditya Rao", subject: "Database Management Systems", className: "SY B.Tech CSE · A", semester: "Semester 3", year: "2026–27", status: "Active" },
-  { id: "a4", teacher: "Prof. Simran Kapoor", subject: "Engineering Mathematics III", className: "SY B.Tech CSE · B", semester: "Semester 3", year: "2026–27", status: "Active" },
-  { id: "a5", teacher: "Unassigned", subject: "Operating Systems", className: "SY B.Tech CSE · B", semester: "Semester 3", year: "2026–27", status: "Needs review" },
-];
+const subjectsBySemester = {
+  "Semester 3": [
+    { code: "MA301", name: "Linear Algebra" },
+    { code: "CECS301", name: "Discrete Structures and Graph Theory" },
+    { code: "CECS302", name: "Database Management Systems" },
+    { code: "CECS303", name: "Computer Architecture and Organization" },
+    { code: "CECS304/CECS305", name: "Data Structures" },
+    { code: "CECS306", name: "Data Science Lab" },
+  ],
+  "Semester 4": [
+    { code: "MA402", name: "Probability and Statistics" },
+    { code: "CECS402", name: "Computer Communications and Networks" },
+    { code: "CECS403", name: "Operating Systems" },
+    { code: "CECS404", name: "Software Engineering" },
+    { code: "CECS405/CECS406", name: "Design and Analysis of Algorithms" },
+    { code: "CECS407", name: "Real-life Problem Solving in AI (Capstone Project)" },
+    { code: "AS401", name: "Constitution of India" },
+  ],
+} as const;
 
 export default function AcademicsPage() {
-  const [assignments, setAssignments] = useState<Assignment[]>(seedAssignments);
-  const [teachersList, setTeachersList] = useState<Teacher[]>(seedTeachers);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [teachersList, setTeachersList] = useState<Teacher[]>([]);
   const [search, setSearch] = useState("");
-  const [teacher, setTeacher] = useState(seedTeachers[0]?.name || "");
-  const [subject, setSubject] = useState("Data Structures");
-  const [className, setClassName] = useState("SY B.Tech CSE · A");
+  const [teacher, setTeacher] = useState("");
+  const [subject, setSubject] = useState("Linear Algebra");
+  const [className, setClassName] = useState("SY B.Tech Computer Science and Engineering · A");
   const [semester, setSemester] = useState("Semester 3");
   const [year, setYear] = useState("2026–27");
   const [message, setMessage] = useState("");
@@ -32,18 +43,18 @@ export default function AcademicsPage() {
   useEffect(() => {
     let active = true;
     Promise.all([
-      apiRequest<Assignment[]>("/admin/teaching-assignments").catch(() => []),
-      apiRequest<Teacher[]>("/admin/teachers").catch(() => []),
+      apiRequest<Assignment[]>("/admin/teaching-assignments"),
+      apiRequest<Teacher[]>("/admin/teachers"),
     ]).then(([liveAssignments, liveTeachers]) => {
       if (!active) return;
-      if (liveAssignments && liveAssignments.length > 0) {
+      if (liveAssignments) {
         setAssignments(liveAssignments);
       }
       if (liveTeachers && liveTeachers.length > 0) {
         setTeachersList(liveTeachers);
         setTeacher(liveTeachers[0].name);
       }
-    });
+    }).catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -87,16 +98,12 @@ export default function AcademicsPage() {
     }
   }
 
-  const subjects = [
-    "Data Structures",
-    "Design & Analysis of Algorithms",
-    "Database Management Systems",
-    "Operating Systems",
-    "Computer Networks",
-    "Engineering Mathematics III",
-    "Web Technology",
-    "Software Engineering"
-  ];
+  const subjects = subjectsBySemester[semester as keyof typeof subjectsBySemester];
+
+  function changeSemester(nextSemester: keyof typeof subjectsBySemester) {
+    setSemester(nextSemester);
+    setSubject(subjectsBySemester[nextSemester][0].name);
+  }
 
   return (
     <>
@@ -148,24 +155,23 @@ export default function AcademicsPage() {
             <div className="field">
               <label>Subject *</label>
               <select required value={subject} onChange={e => setSubject(e.target.value)}>
-                {subjects.map(s => <option key={s}>{s}</option>)}
+                {subjects.map(({ code, name }) => <option key={code} value={name}>{code} · {name}</option>)}
               </select>
             </div>
             <div className="field-grid">
               <div className="field">
                 <label>Class / section *</label>
                 <select value={className} onChange={e => setClassName(e.target.value)}>
-                  <option>SY B.Tech CSE · A</option>
-                  <option>SY B.Tech CSE · B</option>
-                  <option>SY B.Tech IT · A</option>
-                  <option>TY B.Tech CSE · A</option>
-                  <option>TY B.Tech CSE · B</option>
+                  <option>SY B.Tech Computer Science and Engineering · A</option>
+                  <option>SY B.Tech Computer Science and Engineering · B</option>
+                  <option>SY B.Tech Computer Engineering · A</option>
+                  <option>SY B.Tech EXTC · A</option>
                 </select>
               </div>
               <div className="field">
                 <label>Semester *</label>
-                <select value={semester} onChange={e => setSemester(e.target.value)}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n}>Semester {n}</option>)}
+                <select value={semester} onChange={e => changeSemester(e.target.value as keyof typeof subjectsBySemester)}>
+                  {Object.keys(subjectsBySemester).map(value => <option key={value}>{value}</option>)}
                 </select>
               </div>
               <div className="field">

@@ -5,15 +5,12 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Bell, BellRing, CalendarClock, CheckCheck, Clock3, FileCheck2, Info } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
-import { isDemoMode } from "@/lib/api/client";
-import { studentNotifications as seedNotifications } from "@/lib/data/demo";
 import type { StudentNotification } from "@/types/erp";
 
 export default function StudentNotificationsPage() {
-  const [items, setItems] = useState<StudentNotification[]>(isDemoMode ? seedNotifications : []);
+  const [items, setItems] = useState<StudentNotification[]>([]);
   const [message, setMessage] = useState("");
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     erpApi.listStudentNotifications().then(data => { if (active) setItems(data); }).catch(error => { if (active) setMessage(error instanceof Error ? error.message : "Could not load notifications."); });
     return () => { active = false; };

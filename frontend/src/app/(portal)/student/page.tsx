@@ -4,20 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, BellRing, BookOpen, CalendarClock, CheckCircle2, Clock3, FileCheck2, GraduationCap, TrendingUp } from "lucide-react";
 import { Card, PageHeading, StatCard, StatusPill } from "@/components/ui";
-import { studentMeetings as demoMeetings, studentNotifications as demoNotifications, studentDashboardSummary as demoSummary } from "@/lib/data/demo";
 import { erpApi } from "@/lib/api/erp";
-import { isDemoMode } from "@/lib/api/client";
 import type { Meeting, StudentDashboardSummary, StudentNotification } from "@/types/erp";
 
-
-
 export default function StudentDashboard() {
-  const [summary, setSummary] = useState<StudentDashboardSummary | null>(isDemoMode ? demoSummary : null);
-  const [notifications, setNotifications] = useState<StudentNotification[]>(isDemoMode ? demoNotifications : []);
-  const [meetings, setMeetings] = useState<Meeting[]>(isDemoMode ? demoMeetings : []);
+  const [summary, setSummary] = useState<StudentDashboardSummary | null>(null);
+  const [notifications, setNotifications] = useState<StudentNotification[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loadError, setLoadError] = useState("");
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     Promise.all([erpApi.getStudentDashboard(), erpApi.listStudentNotifications(), erpApi.listStudentMeetings()]).then(([dashboard, loadedNotifications, loadedMeetings]) => {
       if (!active) return;
@@ -33,7 +28,7 @@ export default function StudentDashboard() {
   const recentResults = (summary?.recentResults ?? []).filter(result => result.status === "Published" && result.obtained !== null).slice(0, 3);
   return <>
     {loadError && <div className="notice notice-danger" style={{ marginBottom: 14 }}><BellRing size={16}/><div><strong>Dashboard data unavailable</strong>{loadError}</div></div>}
-    <PageHeading eyebrow="STUDENT PORTAL · OCTOBER 2026" title={isDemoMode ? "Welcome back, Aarav 👋" : "Your academic overview"} description="Your academic progress, attendance and upcoming actions in one place." actions={<Link className="btn btn-primary btn-md" href="/student/notifications"><BellRing size={15}/> View notifications {alerts.length > 0 && <span className="nav-badge">{alerts.length}</span>}</Link>} />
+    <PageHeading eyebrow="STUDENT PORTAL · OCTOBER 2026" title="Your academic overview" description="Your academic progress, attendance and upcoming actions in one place." actions={<Link className="btn btn-primary btn-md" href="/student/notifications"><BellRing size={15}/> View notifications {alerts.length > 0 && <span className="nav-badge">{alerts.length}</span>}</Link>} />
     <div className="stat-grid">
       <StatCard label="Current attendance" value={summary ? `${summary.currentAttendance}%` : "—"} hint="Across current subjects" icon={TrendingUp} color="blue" />
       <StatCard label="Average assessment score" value={summary ? `${summary.averageScore}%` : "—"} hint="Published results only" icon={FileCheck2} color="green" />
@@ -50,7 +45,7 @@ export default function StudentDashboard() {
         <div className="simple-list-item"><div className="stat-icon stat-icon-green" style={{ width: 34, height: 34, margin: 0 }}><BookOpen size={17}/></div><div><strong>Review course material</strong><p>Question papers and permitted answer keys are in the library.</p></div><Link className="mini-link" href="/student/papers"><ArrowRight size={15}/></Link></div>
       </Card>
     </div>
-    <Card title="Recent results" subtitle={isDemoMode ? "Sample results for the frontend preview." : "Most recently published assessment results."} action={<Link href="/student/results" className="mini-link">All results <ArrowRight size={13}/></Link>}>
+    <Card title="Recent results" subtitle="Most recently published assessment results." action={<Link href="/student/results" className="mini-link">All results <ArrowRight size={13}/></Link>}>
       <div className="table-wrap"><table className="data-table"><thead><tr><th>Subject</th><th>Assessment</th><th>Score</th><th>Result</th></tr></thead><tbody>{recentResults.map(row=><tr key={row.id}><td><strong>{row.subject}</strong></td><td>{row.assessment}</td><td><strong>{row.obtained}/{row.max}</strong></td><td><StatusPill tone="success">Published</StatusPill></td></tr>)}</tbody></table>{recentResults.length === 0 && <p className="helper-text">No published results are available yet.</p>}</div>
     </Card>
     <div className="content-grid" style={{ marginTop: 18 }}>

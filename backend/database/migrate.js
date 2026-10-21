@@ -1,12 +1,13 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import mysql from 'mysql2/promise';
+import { config } from '../src/config/env.js';
 
 const connection = await mysql.createConnection({
-  host: process.env.MYSQL_HOST || '127.0.0.1',
-  port: Number(process.env.MYSQL_PORT || 3306),
-  user: process.env.MYSQL_USER || 'erp_user',
-  password: process.env.MYSQL_PASSWORD || 'change_me',
+  host: config.mysqlHost,
+  port: config.mysqlPort,
+  user: config.mysqlUser,
+  password: config.mysqlPassword,
   multipleStatements: true,
   timezone: 'Z'
 });

@@ -1,18 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, GraduationCap, ShieldCheck, Sparkles, KeyRound } from "lucide-react";
 import { apiRequest } from "@/lib/api/client";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState("admin@college.edu");
   const [password, setPassword] = useState("AdminPassword123!");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+    try {
+      const token = window.localStorage.getItem("college_erp_access_token");
+      const stored = window.localStorage.getItem("college_erp_user");
+      if (token && stored) {
+        const u = JSON.parse(stored);
+        const accountType = (
+          u.accountType ||
+          (u.is_admin ? "ADMIN" : "") ||
+          u.role ||
+          u.roles?.[0] ||
+          "STUDENT"
+        ).toUpperCase();
+        document.cookie = `college_erp_access_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax`;
+        document.cookie = `college_erp_user_role=${encodeURIComponent(accountType)}; path=/; max-age=604800; SameSite=Lax`;
+
+        if (accountType === "ADMIN") router.replace("/admin");
+        else if (accountType === "TEACHER") router.replace("/teacher");
+        else router.replace("/student");
+      }
+    } catch {}
+  }, [router]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -51,6 +76,34 @@ export default function LoginPage() {
         "STUDENT"
       ).toUpperCase();
 
+      try {
+        document.cookie = `college_erp_access_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax`;
+        document.cookie = `college_erp_user_role=${encodeURIComponent(accountType)}; path=/; max-age=604800; SameSite=Lax`;
+      } catch {}
+
+      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+      const redirectPath = params?.get("redirect");
+
+      if (redirectPath && redirectPath.startsWith("/") && !redirectPath.startsWith("//")) {
+        const adminRestricted = redirectPath.startsWith("/admin");
+        const teacherRestricted = redirectPath.startsWith("/teacher");
+        const studentRestricted = redirectPath.startsWith("/student");
+
+        if (adminRestricted && accountType === "ADMIN") {
+          router.push(redirectPath);
+          return;
+        } else if (teacherRestricted && (accountType === "TEACHER" || accountType === "ADMIN")) {
+          router.push(redirectPath);
+          return;
+        } else if (studentRestricted && (accountType === "STUDENT" || accountType === "ADMIN")) {
+          router.push(redirectPath);
+          return;
+        } else if (!adminRestricted && !teacherRestricted && !studentRestricted) {
+          router.push(redirectPath);
+          return;
+        }
+      }
+
       if (accountType === "ADMIN") {
         router.push("/admin");
       } else if (accountType === "TEACHER") {
@@ -71,8 +124,12 @@ export default function LoginPage() {
     setError("");
   }
 
+  if (!mounted) {
+    return <main className="login-page" suppressHydrationWarning />;
+  }
+
   return (
-    <main className="login-page">
+    <main className="login-page" suppressHydrationWarning>
       <section className="login-story">
         <Link href="/login" className="brand-lockup">
           <span className="brand-mark">
@@ -170,7 +227,7 @@ export default function LoginPage() {
 
           <div style={{ marginTop: 14, padding: "10px 12px", background: "rgba(240, 244, 255, 0.6)", borderRadius: 8, border: "1px solid #dce4f7" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: "#455073", marginBottom: 6 }}>
-              <KeyRound size={13} /> Demo System Accounts
+              <KeyRound size={13} /> Initial Administrator Credentials
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button
@@ -179,23 +236,7 @@ export default function LoginPage() {
                 style={{ fontSize: 11, padding: "3px 8px" }}
                 onClick={() => fillCredentials("admin@college.edu", "AdminPassword123!")}
               >
-                Admin
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: 11, padding: "3px 8px" }}
-                onClick={() => fillCredentials("neha.kulkarni@college.edu", "TeacherPassword123!")}
-              >
-                Teacher
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ fontSize: 11, padding: "3px 8px" }}
-                onClick={() => fillCredentials("aarav.shah@college.edu", "StudentPassword123!")}
-              >
-                Student
+                Auto-fill Admin (admin@college.edu)
               </button>
             </div>
           </div>
@@ -203,6 +244,13 @@ export default function LoginPage() {
           {error && (
             <div className="notice notice-danger" style={{ marginTop: 14 }}>
               {error}
+              {error.toLowerCase().includes("verify your email") && (
+                <div style={{ marginTop: 6 }}>
+                  <Link href="/verify-email" style={{ fontSize: 12, fontWeight: 600, textDecoration: "underline", color: "inherit" }}>
+                    Go to email verification page →
+                  </Link>
+                </div>
+              )}
             </div>
           )}
 
@@ -213,6 +261,11 @@ export default function LoginPage() {
               </>
             )}
           </button>
+
+          <div style={{ textAlign: "center", marginTop: 16, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+            Student and faculty accounts are provisioned exclusively by institutional administrators.
+          </div>
+
           <p className="login-terms">
             By continuing, you agree to follow your institution’s acceptable-use and data-protection policies.
           </p>

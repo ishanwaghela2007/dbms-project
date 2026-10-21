@@ -1,21 +1,21 @@
 import type { AdminDashboardSummary, Followup, MarkRow, Meeting, Paper, Student, StudentAssessmentResult, StudentDashboardSummary, StudentNotification, SubjectProgress, Teacher, TeacherClassAssignment, TeacherDashboardSummary } from "@/types/erp";
 
 export const students: Student[] = [
-  { id: "stu-001", rollNo: "CSE2401", name: "Aarav Shah", email: "aarav.shah@college.edu", department: "Computer Science", program: "B.Tech CSE", semester: "Semester 3", division: "A", attendance: 68, status: "Active" },
-  { id: "stu-002", rollNo: "CSE2402", name: "Diya Patel", email: "diya.patel@college.edu", department: "Computer Science", program: "B.Tech CSE", semester: "Semester 3", division: "A", attendance: 92, status: "Active" },
-  { id: "stu-003", rollNo: "CSE2403", name: "Rohan Mehta", email: "rohan.mehta@college.edu", department: "Computer Science", program: "B.Tech CSE", semester: "Semester 3", division: "A", attendance: 61, status: "Active" },
-  { id: "stu-004", rollNo: "CSE2404", name: "Ananya Desai", email: "ananya.desai@college.edu", department: "Computer Science", program: "B.Tech CSE", semester: "Semester 3", division: "A", attendance: 73, status: "Active" },
-  { id: "stu-005", rollNo: "CSE2405", name: "Kabir Joshi", email: "kabir.joshi@college.edu", department: "Computer Science", program: "B.Tech CSE", semester: "Semester 3", division: "A", attendance: 85, status: "Active" },
-  { id: "stu-006", rollNo: "IT2401", name: "Mira Shah", email: "mira.shah@college.edu", department: "Information Technology", program: "B.Tech IT", semester: "Semester 3", division: "B", attendance: 71, status: "Active" },
-  { id: "stu-007", rollNo: "IT2402", name: "Neel Desai", email: "neel.desai@college.edu", department: "Information Technology", program: "B.Tech IT", semester: "Semester 3", division: "B", attendance: 89, status: "Active" },
-  { id: "stu-008", rollNo: "CSE2301", name: "Tara Kulkarni", email: "tara.kulkarni@college.edu", department: "Computer Science", program: "B.Tech CSE", semester: "Semester 5", division: "A", attendance: 96, status: "Active" },
+  { id: "stu-001", rollNo: "CSE2401", name: "Aarav Shah", email: "aarav.shah@college.edu", department: "Computer Science and Engineering", program: "B.Tech Computer Science and Engineering", semester: "Semester 3", division: "A", attendance: 68, status: "Active" },
+  { id: "stu-002", rollNo: "CSE2402", name: "Diya Patel", email: "diya.patel@college.edu", department: "Computer Science and Engineering", program: "B.Tech Computer Science and Engineering", semester: "Semester 3", division: "A", attendance: 92, status: "Active" },
+  { id: "stu-003", rollNo: "CSE2403", name: "Rohan Mehta", email: "rohan.mehta@college.edu", department: "Computer Science and Engineering", program: "B.Tech Computer Science and Engineering", semester: "Semester 3", division: "A", attendance: 61, status: "Active" },
+  { id: "stu-004", rollNo: "CSE2404", name: "Ananya Desai", email: "ananya.desai@college.edu", department: "Computer Science and Engineering", program: "B.Tech Computer Science and Engineering", semester: "Semester 3", division: "A", attendance: 73, status: "Active" },
+  { id: "stu-005", rollNo: "CSE2405", name: "Kabir Joshi", email: "kabir.joshi@college.edu", department: "Computer Science and Engineering", program: "B.Tech Computer Science and Engineering", semester: "Semester 3", division: "A", attendance: 85, status: "Active" },
+  { id: "stu-006", rollNo: "CE2401", name: "Mira Shah", email: "mira.shah@college.edu", department: "Computer Engineering", program: "B.Tech Computer Engineering", semester: "Semester 3", division: "B", attendance: 71, status: "Active" },
+  { id: "stu-007", rollNo: "CE2402", name: "Neel Desai", email: "neel.desai@college.edu", department: "Computer Engineering", program: "B.Tech Computer Engineering", semester: "Semester 3", division: "B", attendance: 89, status: "Active" },
+  { id: "stu-008", rollNo: "EXTC2301", name: "Tara Kulkarni", email: "tara.kulkarni@college.edu", department: "EXTC", program: "B.Tech EXTC", semester: "Semester 5", division: "A", attendance: 96, status: "Active" },
 ];
 
 export const teachers: Teacher[] = [
-  { id: "fac-001", employeeId: "FAC-1024", name: "Prof. Neha Kulkarni", email: "neha.kulkarni@college.edu", department: "Computer Science", designation: "Assistant Professor", subjects: ["Data Structures", "Design & Analysis of Algorithms"], status: "Active" },
-  { id: "fac-002", employeeId: "FAC-1031", name: "Dr. Aditya Rao", email: "aditya.rao@college.edu", department: "Computer Science", designation: "Associate Professor", subjects: ["Database Management Systems", "Operating Systems"], status: "Active" },
+  { id: "fac-001", employeeId: "FAC-1024", name: "Prof. Neha Kulkarni", email: "neha.kulkarni@college.edu", department: "Computer Science and Engineering", designation: "Assistant Professor", subjects: ["Data Structures", "Design & Analysis of Algorithms"], status: "Active" },
+  { id: "fac-002", employeeId: "FAC-1031", name: "Dr. Aditya Rao", email: "aditya.rao@college.edu", department: "Computer Science and Engineering", designation: "Associate Professor", subjects: ["Database Management Systems", "Operating Systems"], status: "Active" },
   { id: "fac-003", employeeId: "FAC-1048", name: "Prof. Simran Kapoor", email: "simran.kapoor@college.edu", department: "Mathematics", designation: "Assistant Professor", subjects: ["Engineering Mathematics III"], status: "Active" },
-  { id: "fac-004", employeeId: "FAC-1088", name: "Prof. Vikram Iyer", email: "vikram.iyer@college.edu", department: "Information Technology", designation: "Lecturer", subjects: ["Computer Networks", "Web Technology"], status: "Inactive" },
+  { id: "fac-004", employeeId: "FAC-1088", name: "Prof. Vikram Iyer", email: "vikram.iyer@college.edu", department: "EXTC", designation: "Lecturer", subjects: ["Computer Networks", "Web Technology"], status: "Inactive" },
 ];
 
 export const initialMarkRows: MarkRow[] = [
@@ -86,8 +86,8 @@ export const studentDashboardSummary: StudentDashboardSummary = {
 };
 
 export const teacherClassAssignments: TeacherClassAssignment[] = [
-  { id: "ta-001", classId: "class-sy-cse-a", subjectId: "subject-ds", classSubjectId: "offering-ds-sy-cse-a", className: "SY B.Tech CSE · A", subject: "Data Structures", semester: "Semester 3", academicYear: "2026–27" },
-  { id: "ta-002", classId: "class-sy-cse-a", subjectId: "subject-dbms", classSubjectId: "offering-dbms-sy-cse-a", className: "SY B.Tech CSE · A", subject: "Database Management Systems", semester: "Semester 3", academicYear: "2026–27" },
-  { id: "ta-003", classId: "class-sy-it-b", subjectId: "subject-cn", classSubjectId: "offering-cn-sy-it-b", className: "SY B.Tech IT · B", subject: "Computer Networks", semester: "Semester 3", academicYear: "2026–27" },
-  { id: "ta-004", classId: "class-ty-cse-a", subjectId: "subject-daa", classSubjectId: "offering-daa-ty-cse-a", className: "TY B.Tech CSE · A", subject: "Design & Analysis of Algorithms", semester: "Semester 5", academicYear: "2026–27" },
+  { id: "ta-001", classId: "class-sy-cse-a", subjectId: "subject-ds", classSubjectId: "offering-ds-sy-cse-a", className: "SY B.Tech Computer Science and Engineering · A", subject: "Data Structures", semester: "Semester 3", academicYear: "2026–27" },
+  { id: "ta-002", classId: "class-sy-cse-a", subjectId: "subject-dbms", classSubjectId: "offering-dbms-sy-cse-a", className: "SY B.Tech Computer Science and Engineering · A", subject: "Database Management Systems", semester: "Semester 3", academicYear: "2026–27" },
+  { id: "ta-003", classId: "class-sy-ce-b", subjectId: "subject-cn", classSubjectId: "offering-cn-sy-ce-b", className: "SY B.Tech Computer Engineering · B", subject: "Computer Networks", semester: "Semester 3", academicYear: "2026–27" },
+  { id: "ta-004", classId: "class-ty-extc-a", subjectId: "subject-daa", classSubjectId: "offering-daa-ty-extc-a", className: "TY B.Tech EXTC · A", subject: "Design & Analysis of Algorithms", semester: "Semester 5", academicYear: "2026–27" },
 ];

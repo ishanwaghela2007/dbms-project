@@ -1,18 +1,4 @@
 import { apiRequest } from "@/lib/api/client";
-import {
-  adminDashboardSummary,
-  followups,
-  initialMarkRows,
-  papers,
-  studentDashboardSummary,
-  studentMeetings,
-  studentNotifications,
-  students,
-  teachers,
-  teacherDashboardSummary,
-  demoStudentResults,
-  teacherClassAssignments,
-} from "@/lib/data/demo";
 import type {
   AdminDashboardSummary,
   Followup,
@@ -29,21 +15,21 @@ import type {
 } from "@/types/erp";
 
 export const erpApi = {
-  getAdminDashboard: () => apiRequest<AdminDashboardSummary>("/admin/dashboard").catch(() => adminDashboardSummary),
-  getTeacherDashboard: () => apiRequest<TeacherDashboardSummary>("/teacher/dashboard").catch(() => teacherDashboardSummary),
-  getStudentDashboard: () => apiRequest<StudentDashboardSummary>("/student/dashboard").catch(() => studentDashboardSummary),
-  listStudentResults: () => apiRequest<StudentAssessmentResult[]>("/student/results").catch(() => demoStudentResults),
-  listStudents: () => apiRequest<Student[]>("/admin/students").catch(() => students),
-  listTeachers: () => apiRequest<Teacher[]>("/admin/teachers").catch(() => teachers),
-  listTeacherClassAssignments: () => apiRequest<TeacherClassAssignment[]>("/teacher/classes").catch(() => teacherClassAssignments),
+  getAdminDashboard: () => apiRequest<AdminDashboardSummary>("/admin/dashboard"),
+  getTeacherDashboard: () => apiRequest<TeacherDashboardSummary>("/teacher/dashboard"),
+  getStudentDashboard: () => apiRequest<StudentDashboardSummary>("/student/dashboard"),
+  listStudentResults: () => apiRequest<StudentAssessmentResult[]>("/student/results"),
+  listStudents: () => apiRequest<Student[]>("/admin/students"),
+  listTeachers: () => apiRequest<Teacher[]>("/admin/teachers"),
+  listTeacherClassAssignments: () => apiRequest<TeacherClassAssignment[]>("/teacher/classes"),
   listTeacherClassRoster: (classId: string, subjectId: string) =>
-    apiRequest<Student[]>(`/teacher/classes/${encodeURIComponent(classId)}/subjects/${encodeURIComponent(subjectId)}/students`).catch(() => students),
-  listFollowups: () => apiRequest<Followup[]>("/teacher/attendance/low").catch(() => followups),
-  listMarkRows: () => apiRequest<MarkRow[]>("/teacher/marks/current").catch(() => initialMarkRows),
-  listPapers: () => apiRequest<Paper[]>("/papers").catch(() => papers),
-  listStudentNotifications: () => apiRequest<StudentNotification[]>("/student/notifications").catch(() => studentNotifications),
-  listStudentMeetings: () => apiRequest<Meeting[]>("/student/meetings").catch(() => studentMeetings),
-  listTeacherMeetings: () => apiRequest<Meeting[]>("/teacher/meetings").catch(() => studentMeetings),
+    apiRequest<Student[]>(`/teacher/classes/${encodeURIComponent(classId)}/subjects/${encodeURIComponent(subjectId)}/students`),
+  listFollowups: () => apiRequest<Followup[]>("/teacher/attendance/low"),
+  listMarkRows: () => apiRequest<MarkRow[]>("/teacher/marks/current"),
+  listPapers: () => apiRequest<Paper[]>("/papers"),
+  listStudentNotifications: () => apiRequest<StudentNotification[]>("/student/notifications"),
+  listStudentMeetings: () => apiRequest<Meeting[]>("/student/meetings"),
+  listTeacherMeetings: () => apiRequest<Meeting[]>("/teacher/meetings"),
   createStudent: (payload: Partial<Student>) =>
     apiRequest<Student>("/admin/students", { method: "POST", body: JSON.stringify(payload) }),
   createTeacher: (payload: Partial<Teacher>) =>
@@ -82,12 +68,20 @@ export const erpApi = {
   updateMyProfile: (payload: { fullName?: string; phone?: string; address?: string; officeLocation?: string; specialization?: string }) =>
     apiRequest<Record<string, unknown>>("/profile/me", { method: "PATCH", body: JSON.stringify(payload) }),
   uploadAvatar: (form: FormData) =>
-    apiRequest<{ mediaAssetId: string; userId: string }>("/profile/avatar", { method: "POST", body: form }),
+    apiRequest<{ mediaAssetId: string; userId: string; avatarUrl: string; avatarPublicId: string }>("/profile/avatar", { method: "POST", body: form }),
   changePassword: (payload: { currentPassword: string; newPassword: string }) =>
     apiRequest<{ ok: boolean; message: string }>("/auth/change-password", { method: "PATCH", body: JSON.stringify(payload) }),
   forgotPassword: (email: string) =>
     apiRequest<{ ok: boolean; message: string }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
   resetPassword: (token: string, password: string) =>
     apiRequest<{ ok: boolean; message: string }>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) }),
+  register: (payload: { fullName: string; email: string; password: string; accountType?: string; departmentId?: string; programId?: string; enrollmentNo?: string; employeeId?: string; autoActivate?: boolean }) =>
+    apiRequest<{ success: boolean; message: string; email: string; isActive?: boolean }>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
+  verifyEmail: (token: string) =>
+    apiRequest<{ success: boolean; message: string; email?: string; fullName?: string }>("/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) }),
+  resendVerification: (email: string) =>
+    apiRequest<{ success: boolean; message: string; alreadyActive?: boolean }>("/auth/resend-verification", { method: "POST", body: JSON.stringify({ email }) }),
+  acceptInvitation: (payload: { token: string; password: string }) =>
+    apiRequest<{ success: boolean; message: string; email?: string }>("/auth/accept-invitation", { method: "POST", body: JSON.stringify(payload) }),
 };
 

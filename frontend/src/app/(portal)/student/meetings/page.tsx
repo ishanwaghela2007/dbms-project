@@ -4,8 +4,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CalendarClock, CheckCircle2, Clock3, MapPin, Plus, XCircle } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
-import { isDemoMode } from "@/lib/api/client";
-import { studentMeetings as seedMeetings } from "@/lib/data/demo";
 import type { Meeting } from "@/types/erp";
 
 const slots = [
@@ -22,14 +20,13 @@ function tone(status: Meeting["status"]): "success" | "warning" | "danger" | "in
 }
 
 export default function StudentMeetingsPage() {
-  const [meetings, setMeetings] = useState<Meeting[]>(isDemoMode ? seedMeetings : []);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [slotId, setSlotId] = useState(slots[1].id);
   const [message, setMessage] = useState("I would like to discuss my attendance and how to improve it.");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
-    if (isDemoMode) return;
     let active = true;
     erpApi.listStudentMeetings().then(data => { if (active) setMeetings(data); }).catch(e => { if (active) setError(e instanceof Error ? e.message : "Could not load meetings."); });
     return () => { active = false; };
@@ -40,20 +37,13 @@ export default function StudentMeetingsPage() {
     event.preventDefault(); setError(""); setNotice(""); setSaving(true);
     try {
       const response = await erpApi.requestMeeting(selectedSlot.followup, { slotId: selectedSlot.id, message });
-      const created: Meeting = response?.meeting ?? {
-        id: `mtg-${Date.now()}`,
-        studentId: "stu-001",
-        studentName: "Aarav Shah",
-        teacherName: selectedSlot.teacher,
-        subject: selectedSlot.subject,
-        date: selectedSlot.date,
-        time: selectedSlot.time,
-        location: selectedSlot.location,
-        status: "REQUESTED",
-        message,
-      };
-      if (!created) throw new Error("The meeting API did not return the created appointment. Check the response contract.");
-      setMeetings(current => [created, ...current]); setNotice(response.message || "Meeting request submitted. It is pending teacher approval.");
+      const refreshed = await erpApi.listStudentMeetings().catch(() => null);
+      if (refreshed) {
+        setMeetings(refreshed);
+      } else if (response?.meeting) {
+        setMeetings(current => [response.meeting!, ...current]);
+      }
+      setNotice(response.message || "Meeting request submitted. It is pending teacher approval.");
     } catch (e) { setError(e instanceof Error ? e.message : "Unable to request a meeting."); }
     finally { setSaving(false); }
   }

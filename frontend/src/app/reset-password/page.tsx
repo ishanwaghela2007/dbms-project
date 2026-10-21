@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState, type FormEvent, Suspense } from "react";
+import { useState, useEffect, type FormEvent, Suspense } from "react";
 import { ArrowRight, Eye, EyeOff, GraduationCap, ShieldCheck } from "lucide-react";
 import { erpApi } from "@/lib/api/erp";
 
@@ -10,6 +10,7 @@ function ResetPasswordForm() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
 
+  const [mounted, setMounted] = useState(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -17,6 +18,10 @@ function ResetPasswordForm() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -36,8 +41,12 @@ function ResetPasswordForm() {
     }
   }
 
+  if (!mounted) {
+    return <main className="login-page" suppressHydrationWarning />;
+  }
+
   return (
-    <main className="login-page">
+    <main className="login-page" suppressHydrationWarning>
       <section className="login-story">
         <Link href="/login" className="brand-lockup">
           <span className="brand-mark">
