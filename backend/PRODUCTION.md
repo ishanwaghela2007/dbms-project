@@ -10,10 +10,14 @@ Before deployment, configure these values in the deployment platform's secret ma
 - `FRONTEND_BASE_URL` - HTTPS public frontend URL used in generated links
 - `TRUST_PROXY` - the trusted reverse-proxy setting, for example `loopback` when the gateway is only reached through a local proxy
 - `REQUIRE_HTTPS=true`
+- `SERVICE_AUTH_SECRET` - a unique 32+ character secret used to authenticate internal workload-to-workload gRPC requests
+- `GRPC_SECURITY_MODE=mtls` plus `GRPC_TLS_CA_PATH`, `GRPC_TLS_CERT_PATH`, and `GRPC_TLS_KEY_PATH` - required for authenticated, encrypted internal production traffic
 - `COOKIE_CONSENT_RETENTION_DAYS` - maximum consent-log retention period; defaults to 90 days
 - Mail and media-provider credentials, if those integrations are enabled
 
 Deploy behind HTTPS. If TLS terminates at a reverse proxy, configure `TRUST_PROXY` correctly so Express can enforce HTTPS and record the original client IP address.
+
+See [ZERO_TRUST.md](ZERO_TRUST.md) for workload identity, mTLS, and service-scoped database configuration.
 
 Run `npm run db:migrate` with a MySQL migration account that can create the project's triggers. The account needs the database permissions required by the schema and triggers, or the database administrator must enable the appropriate binary-log trigger policy.
 

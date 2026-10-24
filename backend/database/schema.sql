@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_admin BOOLEAN NOT NULL DEFAULT FALSE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   must_set_password BOOLEAN NOT NULL DEFAULT FALSE,
+  auth_version INT UNSIGNED NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_users_account_type (account_type, is_active),
@@ -217,11 +218,32 @@ CREATE TABLE IF NOT EXISTS mark_validation_jobs (
   status ENUM('PROCESSING','NEEDS_REVIEW','CONFIRMED','FAILED') NOT NULL DEFAULT 'PROCESSING',
   extraction_mode ENUM('TEXT','OCR','MIXED','FAILED') NOT NULL DEFAULT 'TEXT',
   error_message VARCHAR(500),
+  input_pdf LONGBLOB NULL,
+  entered_rows_json JSON NULL,
+  attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  worker_locked_at TIMESTAMP NULL,
+  completed_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   confirmed_at TIMESTAMP NULL,
   FOREIGN KEY (assessment_id) REFERENCES assessments(id),
   FOREIGN KEY (teacher_user_id) REFERENCES faculty_profiles(user_id),
   INDEX idx_validation_teacher_status (teacher_user_id, status, created_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS email_outbox_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  event_key VARCHAR(180) NOT NULL UNIQUE,
+  recipient_email VARCHAR(320) NOT NULL,
+  email_kind ENUM('PASSWORD_RESET','VERIFY_EMAIL','INVITATION','NOTIFICATION') NOT NULL,
+  payload_json JSON NOT NULL,
+  status ENUM('PENDING','PROCESSING','DELIVERED','FAILED') NOT NULL DEFAULT 'PENDING',
+  attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  available_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  worker_locked_at TIMESTAMP NULL,
+  last_error VARCHAR(500) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  delivered_at TIMESTAMP NULL,
+  INDEX idx_email_outbox_ready (status, available_at, created_at)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS mark_validation_items (

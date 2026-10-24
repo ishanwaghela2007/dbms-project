@@ -287,5 +287,5 @@ const handlers = {
   }
 };
 
-startGrpcService({name:'attendance-service',address:process.env.ATTENDANCE_GRPC_ADDR||'127.0.0.1:50055',Service:erpProto.AttendanceService,handlers});
+startGrpcService({name:'attendance-service',serviceName:'attendance',address:process.env.ATTENDANCE_GRPC_ADDR||'127.0.0.1:50055',Service:erpProto.AttendanceService,handlers});
 logger.info('Attendance service initialized');

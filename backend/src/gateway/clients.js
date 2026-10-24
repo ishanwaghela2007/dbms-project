@@ -10,11 +10,11 @@ const config = {
   notification: process.env.NOTIFICATION_GRPC_ADDR || '127.0.0.1:50057',
 };
 export const clients = {
-  auth: createJsonClient(erpProto.AuthService, config.auth),
-  profile: createJsonClient(erpProto.ProfileService, config.profile),
-  academic: createJsonClient(erpProto.AcademicService, config.academic),
-  marks: createJsonClient(erpProto.MarksService, config.marks),
-  attendance: createJsonClient(erpProto.AttendanceService, config.attendance),
-  paper: createJsonClient(erpProto.PaperService, config.paper),
-  notification: createJsonClient(erpProto.NotificationService, config.notification),
+  auth: createJsonClient(erpProto.AuthService, config.auth, 'auth'),
+  profile: createJsonClient(erpProto.ProfileService, config.profile, 'profile'),
+  academic: createJsonClient(erpProto.AcademicService, config.academic, 'academic'),
+  marks: createJsonClient(erpProto.MarksService, config.marks, 'marks'),
+  attendance: createJsonClient(erpProto.AttendanceService, config.attendance, 'attendance'),
+  paper: createJsonClient(erpProto.PaperService, config.paper, 'paper'),
+  notification: createJsonClient(erpProto.NotificationService, config.notification, 'notification'),
 };

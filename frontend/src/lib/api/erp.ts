@@ -37,7 +37,9 @@ export const erpApi = {
   saveAttendance: (payload: unknown) =>
     apiRequest<{ ok: boolean; message: string }>("/teacher/attendance/sessions", { method: "POST", body: JSON.stringify(payload) }),
   previewMarksPdf: (form: FormData) =>
-    apiRequest<{ rows: MarkRow[]; message?: string }>("/teacher/marks/pdf-validation/preview", { method: "POST", body: form }),
+    apiRequest<{ jobId: string; status: string; message?: string }>("/teacher/marks/pdf-validation/preview", { method: "POST", body: form }),
+  getMarksValidation: (jobId: string) =>
+    apiRequest<{ job: { status: string; error_message?: string }; rows: MarkRow[]; message?: string }>(`/teacher/marks/pdf-validation/${encodeURIComponent(jobId)}`),
   confirmMarks: (payload: unknown) =>
     apiRequest<{ ok: boolean; message: string }>("/teacher/marks/pdf-validation/confirm", { method: "POST", body: JSON.stringify(payload) }),
   createFollowup: (payload: { studentId: string; [key: string]: unknown }) =>

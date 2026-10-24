@@ -87,5 +87,5 @@ const handlers={
     return { mediaAssetId: mediaId, userId: input.userId, cloudinaryPublicId: input.cloudinaryPublicId };
   }
 };
-startGrpcService({name:'paper-media-service',address:process.env.PAPER_GRPC_ADDR||'127.0.0.1:50056',Service:erpProto.PaperService,handlers});
+startGrpcService({name:'paper-media-service',serviceName:'paper',address:process.env.PAPER_GRPC_ADDR||'127.0.0.1:50056',Service:erpProto.PaperService,handlers});
 logger.info('Paper & Media service initialized');

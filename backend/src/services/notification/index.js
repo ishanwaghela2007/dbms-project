@@ -3,7 +3,7 @@ import { pool } from '../../shared/db.js';
 import { erpProto, startGrpcService } from '../../shared/grpc.js';
 import { forbidden, notFound, badRequest } from '../../shared/errors.js';
 import { logger } from '../../shared/logger.js';
-import { sendNotificationMail } from '../../shared/mailer.js';
+import { sendForgotPasswordMail, sendInvitationMail, sendNotificationMail, sendVerificationMail } from '../../shared/mailer.js';
 
 async function actor(id) { const [r]=await pool.execute('SELECT id,account_type,is_admin,is_active FROM users WHERE id=?',[id]); return r[0]; }
 async function deliverBatch() {
@@ -15,22 +15,43 @@ async function deliverBatch() {
       await conn.execute(`INSERT INTO student_notifications (id,recipient_user_id,event_key,notification_type,title,message,related_entity_type,related_entity_id) VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`,[randomUUID(),e.recipient_user_id,e.event_key,e.notification_type,e.title,e.message,e.related_entity_type,e.related_entity_id]);
       await conn.execute(`UPDATE notification_outbox_events SET status='DELIVERED',attempts=attempts+1,delivered_at=UTC_TIMESTAMP(),last_error=NULL WHERE id=?`,[e.id]);
 
-      // Shoot notification also in email via Nodemailer
+      // Persist the email independently; notification delivery must not wait for SMTP.
       const [uRows] = await conn.execute('SELECT email, full_name FROM users WHERE id=? LIMIT 1', [e.recipient_user_id]);
       if (uRows[0]?.email) {
-        sendNotificationMail({
-          to: uRows[0].email,
-          fullName: uRows[0].full_name,
-          title: e.title,
-          message: e.message,
-          kind: e.notification_type,
-        }).catch(err => logger.warn({ err: err.message, recipient: uRows[0].email }, 'Failed to shoot notification email'));
+        await conn.execute(`INSERT INTO email_outbox_events (event_key,recipient_email,email_kind,payload_json)
+          VALUES (?,?, 'NOTIFICATION', ?) ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`,
+          [`notification:${e.event_key}`,uRows[0].email,JSON.stringify({fullName:uRows[0].full_name,title:e.title,message:e.message,kind:e.notification_type})]);
       }
     }
     await conn.commit();
   } catch(err) {
     await conn.rollback(); logger.error({err:err.message},'Notification outbox delivery batch failed');
     try { await pool.execute(`UPDATE notification_outbox_events SET attempts=attempts+1,last_error=? WHERE status='PENDING' AND attempts<10`,[String(err.message).slice(0,500)]); } catch {}
+  } finally { conn.release(); }
+}
+async function deliverEmailBatch() {
+  const conn=await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [events]=await conn.query(`SELECT * FROM email_outbox_events WHERE status='PENDING' AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 25 FOR UPDATE SKIP LOCKED`);
+    for(const event of events) await conn.execute(`UPDATE email_outbox_events SET status='PROCESSING',attempts=attempts+1,worker_locked_at=UTC_TIMESTAMP() WHERE id=?`,[event.id]);
+    await conn.commit();
+    for(const event of events) {
+      const payload=typeof event.payload_json==='string'?JSON.parse(event.payload_json):event.payload_json;
+      let result;
+      if(event.email_kind==='PASSWORD_RESET') result=await sendForgotPasswordMail({to:event.recipient_email,...payload});
+      else if(event.email_kind==='VERIFY_EMAIL') result=await sendVerificationMail({to:event.recipient_email,...payload});
+      else if(event.email_kind==='INVITATION') result=await sendInvitationMail({to:event.recipient_email,...payload});
+      else result=await sendNotificationMail({to:event.recipient_email,...payload});
+      if(result?.success) await pool.execute(`UPDATE email_outbox_events SET status='DELIVERED',delivered_at=UTC_TIMESTAMP(),worker_locked_at=NULL,last_error=NULL WHERE id=?`,[event.id]);
+      else throw Object.assign(new Error(result?.error||'Email provider rejected delivery'),{eventId:event.id,attempts:event.attempts});
+    }
+  } catch(err) {
+    await conn.rollback().catch(()=>{});
+    if(err.eventId) {
+      const retry=Number(err.attempts)<5;
+      await pool.execute(`UPDATE email_outbox_events SET status=?,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL ? SECOND),worker_locked_at=NULL,last_error=? WHERE id=?`,[retry?'PENDING':'FAILED',retry?Math.min(300,2**Number(err.attempts)):0,String(err.message).slice(0,500),err.eventId]);
+    } else logger.error({err:err.message},'Email outbox delivery batch failed');
   } finally { conn.release(); }
 }
 const handlers={
@@ -53,7 +74,9 @@ const handlers={
     return {eventKey,status:'PENDING'};
   }
 };
-startGrpcService({name:'notification-service',address:process.env.NOTIFICATION_GRPC_ADDR||'127.0.0.1:50057',Service:erpProto.NotificationService,handlers});
+startGrpcService({name:'notification-service',serviceName:'notification',address:process.env.NOTIFICATION_GRPC_ADDR||'127.0.0.1:50057',Service:erpProto.NotificationService,handlers});
 setInterval(()=>{deliverBatch().catch(err=>logger.error({err:err.message},'Outbox worker error'));},2000).unref();
 deliverBatch().catch(err=>logger.warn({err:err.message},'Initial outbox poll failed; retrying on interval'));
+setInterval(()=>{deliverEmailBatch().catch(err=>logger.error({err:err.message},'Email outbox worker error'));},2000).unref();
+deliverEmailBatch().catch(err=>logger.warn({err:err.message},'Initial email outbox poll failed; retrying on interval'));
 logger.info('Notification service initialized');

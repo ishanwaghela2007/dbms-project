@@ -1,52 +1,36 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env.js';
-import { rpc } from '../shared/grpc.js';
-import { clients } from './clients.js';
 import { redis, isRedisReady, safeDelete } from '../shared/redis.js';
 import { logger } from '../shared/logger.js';
 
-export function authenticate(req, res, next) {
+export async function authenticate(req, res, next) {
   const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Authentication required', code: 'UNAUTHENTICATED' });
   try {
     const decoded = jwt.verify(token, config.jwtSecret, { issuer: config.jwtIssuer, audience: config.jwtAudience });
-    if (!decoded || typeof decoded !== 'object' || typeof decoded.sub !== 'string') return res.status(401).json({ error: 'Invalid token', code: 'UNAUTHENTICATED' });
+    if (!decoded || typeof decoded !== 'object' || typeof decoded.sub !== 'string' || decoded.active !== true || !['ADMIN','TEACHER','STUDENT'].includes(decoded.accountType) || !Number.isInteger(decoded.authVersion)) return res.status(401).json({ error: 'Invalid token claims', code: 'UNAUTHENTICATED' });
+    if (isRedisReady()) {
+      const currentVersion=await redis.get(`authz:version:${decoded.sub}`);
+      if (currentVersion === 'invalidated' || (currentVersion && Number(currentVersion)!==decoded.authVersion)) return res.status(401).json({ error: 'Session has been revoked', code: 'UNAUTHENTICATED' });
+    } else {
+      // M-2 fix: Redis is unavailable — revocation cannot be checked. Log every occurrence so
+      // ops can see the fail-open window. JWT TTL (15m) naturally bounds the exposure.
+      logger.warn({ userId: decoded.sub, path: req.path }, 'Redis unavailable: token revocation check skipped (fail-open)');
+    }
     req.auth = { userId: decoded.sub };
+    req.user = { id:decoded.sub, email:decoded.email, fullName:decoded.fullName, accountType:decoded.accountType, is_admin:Boolean(decoded.isAdmin), is_active:true };
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHENTICATED' });
   }
 }
 
-async function getAuthorization(userId) {
-  const key = `authz:${userId}`;
-  if (isRedisReady()) {
-    try { const cached = await redis.get(key); if (cached) return JSON.parse(cached); }
-    catch (err) { logger.warn({ err: err.message }, 'Authorization cache read failed; using Auth Service'); }
-  }
-  // Fail closed when the authoritative service cannot verify current status.
-  const authorization = await rpc(clients.auth, 'getAuthorization', { userId });
-  if (!authorization.found || !authorization.is_active) return authorization;
-  if (isRedisReady()) {
-    try { await redis.set(key, JSON.stringify(authorization), { EX: config.authzCacheTtl }); }
-    catch (err) { logger.warn({ err: err.message }, 'Authorization cache write failed'); }
-  }
-  return authorization;
-}
 
 export function requireUser(allowedTypes = []) {
-  return async (req, res, next) => {
-    try {
-      const authz = await getAuthorization(req.auth.userId);
-      if (!authz?.found || !authz.is_active) return res.status(403).json({ error: 'Account is inactive or unavailable', code: 'FORBIDDEN' });
-      req.user = authz;
-      if (authz.is_admin) return next();
-      if (allowedTypes.length && !allowedTypes.includes(authz.accountType)) return res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
-      next();
-    } catch (error) {
-      logger.warn({ err: error.message }, 'Could not verify authorization');
-      res.status(503).json({ error: 'Authorization service unavailable', code: 'AUTHORIZATION_UNAVAILABLE' });
-    }
+  return (req, res, next) => {
+    if (!req.user?.is_active) return res.status(403).json({ error: 'Account is inactive or unavailable', code: 'FORBIDDEN' });
+    if (!req.user.is_admin && allowedTypes.length && !allowedTypes.includes(req.user.accountType)) return res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
+    next();
   };
 }
 
@@ -57,4 +41,4 @@ export function requireAdmin(req, res, next) {
     next();
   });
 }
-export function clearAuthorizationCache(userId) { return safeDelete(`authz:${userId}`); }
+export function clearAuthorizationCache(userId) { return safeDelete(`authz:version:${userId}`); }

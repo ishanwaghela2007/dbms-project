@@ -4,13 +4,11 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root_dev_change_me
-      MYSQL_DATABASE: college_erp
-      MYSQL_USER: erp_user
-      MYSQL_PASSWORD: change_me
     ports:
       - "3306:3306"
     volumes:
       - erp_mysql:/var/lib/mysql
+      - ./database/init/000-service-databases.sql:/docker-entrypoint-initdb.d/000-service-databases.sql:ro
       - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
       - ./database/triggers.sql:/docker-entrypoint-initdb.d/002-triggers.sql:ro
     healthcheck:

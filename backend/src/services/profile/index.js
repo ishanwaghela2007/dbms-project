@@ -5,7 +5,7 @@ import { badRequest, forbidden, notFound } from '../../shared/errors.js';
 import { logger } from '../../shared/logger.js';
 import { safeDelete } from '../../shared/redis.js';
 
-const authClient = createJsonClient(erpProto.AuthService, process.env.AUTH_GRPC_ADDR || '127.0.0.1:50051');
+const authClient = createJsonClient(erpProto.AuthService, process.env.AUTH_GRPC_ADDR || '127.0.0.1:50051', 'auth');
 function like(q) { return `%${String(q || '').trim().replace(/[\\%_]/g, '\\$&')}%`; }
 async function assertAdmin(actorUserId) {
   const [rows] = await pool.execute('SELECT is_admin,is_active FROM users WHERE id=?', [actorUserId]);
@@ -175,5 +175,5 @@ const handlers = {
   },
 };
 
-startGrpcService({ name: 'profile-service', address: process.env.PROFILE_GRPC_ADDR || '127.0.0.1:50052', Service: erpProto.ProfileService, handlers });
+startGrpcService({ name: 'profile-service', serviceName: 'profile', address: process.env.PROFILE_GRPC_ADDR || '127.0.0.1:50052', Service: erpProto.ProfileService, handlers });
 logger.info('Profile service initialized');

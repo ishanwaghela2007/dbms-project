@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import XLSX from 'xlsx';
+import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { pool, pingDb } from '../shared/db.js';
 import { logger } from '../shared/logger.js';
@@ -83,12 +84,42 @@ function formatValidationItem(row, maxMarks) {
 }
 async function getPaperRows(req) { const result=await rpcHttp(clients.paper,'listPapers',payload(req,{status:req.query.status,subjectId:req.query.subjectId})); return items(result).map(formatPaper); }
 
+// H-3 fix: zod schemas validate auth-route inputs before forwarding to gRPC services.
+const loginSchema = z.object({
+  email: z.string().email('Invalid email address').max(255),
+  password: z.string().min(1, 'Password is required').max(1024),
+});
+const registerSchema = z.object({
+  email: z.string().email().max(255),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(1024),
+  fullName: z.string().min(1).max(180),
+  accountType: z.enum(['STUDENT', 'TEACHER', 'ADMIN']).optional(),
+});
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(1024),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters').max(1024),
+});
+const resetPasswordSchema = z.object({
+  token: z.string().min(1).max(512),
+  password: z.string().min(8).max(1024),
+});
+function validate(schema) {
+  return (req, res, next) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error.errors[0]?.message || 'Invalid request body', code: 'VALIDATION_ERROR' });
+    }
+    req.body = result.data;
+    next();
+  };
+}
+
 app.get('/health', wrap(async(_req,res)=>{
   const db=await pingDb(); res.json({status:db?'ok':'degraded',service:'college-erp-api-gateway',database:db?'ok':'down',redis:isRedisReady()?'ok':'fallback-to-auth-service',timestamp:new Date().toISOString()});
 }));
 app.get('/ready', wrap(async(_req,res)=>{ const db=await pingDb(); if(!db) return res.status(503).json({ready:false}); res.json({ready:true}); }));
 
-// Authentication: roles and is_admin are loaded from the Auth Service, never trusted from request JSON.
+// Authentication and authorization claims are verified locally from the signed access token.
 api.post('/cookie-consents', rateLimit({windowMs:60*60*1000,limit:30,standardHeaders:true,legacyHeaders:false,message:{error:'Too many cookie preference requests'}}), wrap(async(req,res)=>{
   const decision=req.body?.decision;
   if (decision !== 'ACCEPTED' && decision !== 'REJECTED') return res.status(400).json({error:'decision must be ACCEPTED or REJECTED'});
@@ -96,18 +127,23 @@ api.post('/cookie-consents', rateLimit({windowMs:60*60*1000,limit:30,standardHea
   const userAgent=String(req.get('user-agent') || '').slice(0,1024) || null;
   const requestedPath=String(req.body?.requestedPath || '').slice(0,255) || null;
   await pool.execute('INSERT INTO cookie_consent_logs (id,decision,ip_address,user_agent,requested_path,request_id) VALUES (?,?,?,?,?,?)',[randomUUID(),decision,ipAddress,userAgent,requestedPath,req.requestId]);
-  await pool.execute('DELETE FROM cookie_consent_logs WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)',[config.cookieConsentRetentionDays]);
+  // H-4 fix: cleanup runs async/fire-and-forget — no longer blocks the response and no longer
+  // performs a full table scan on every single POST request.
+  setImmediate(() => {
+    pool.execute('DELETE FROM cookie_consent_logs WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)',[config.cookieConsentRetentionDays])
+      .catch(err => logger.warn({ err: err.message }, 'Cookie consent log cleanup failed'));
+  });
   res.status(201).json({recorded:true});
 }));
-api.post('/auth/login', rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:true,legacyHeaders:false,message:{error:'Too many login attempts'}}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'login',req.body||{}))));
-api.post('/auth/register', authenticate, requireAdmin, wrap(async(req,res)=>res.status(201).json(await rpcHttp(clients.auth,'register',{...req.body,actorUserId:req.auth.userId}))));
+api.post('/auth/login', rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:true,legacyHeaders:false,message:{error:'Too many login attempts'}}), validate(loginSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'login',req.body||{}))));
+api.post('/auth/register', authenticate, requireAdmin, validate(registerSchema), wrap(async(req,res)=>res.status(201).json(await rpcHttp(clients.auth,'register',{...req.body,actorUserId:req.auth.userId}))));
 api.post('/auth/verify-email', rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'verifyEmail',req.body||{}))));
 api.post('/auth/resend-verification', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resendVerification',req.body||{}))));
 api.post('/auth/accept-invitation', rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'acceptInvitation',req.body||{}))));
 api.get('/auth/me', authenticate, requireUser([]), wrap(async(req,res)=>res.json({id:req.user.id,email:req.user.email,name:req.user.fullName,accountType:req.user.accountType,is_admin:req.user.is_admin,is_active:req.user.is_active,avatar_public_id:req.user.avatar_public_id||undefined})));
 api.post('/auth/forgot-password', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'forgotPassword',req.body||{}))));
-api.post('/auth/reset-password', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resetPassword',req.body||{}))));
-api.patch('/auth/change-password', authenticate, requireUser([]), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'changePassword',{actorUserId:req.auth.userId,...req.body}))));
+api.post('/auth/reset-password', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), validate(resetPasswordSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resetPassword',req.body||{}))));
+api.patch('/auth/change-password', authenticate, requireUser([]), validate(changePasswordSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'changePassword',{actorUserId:req.auth.userId,...req.body}))));
 api.get('/profile/me', authenticate, requireUser([]), wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'getMyProfile',{actorUserId:req.auth.userId}))));
 api.patch('/profile/me', authenticate, requireUser([]), wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'updateMyProfile',{actorUserId:req.auth.userId,...req.body}))));
 api.get('/teacher/profile', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'getTeacher',{actorUserId:req.auth.userId,teacherId:req.auth.userId}))));
@@ -184,7 +220,17 @@ api.get('/teacher/dashboard', authenticate, requireUser(['TEACHER']), wrap(async
   const actorUserId=req.auth.userId;
   const [classes,assessments,low]=await Promise.all([rpcHttp(clients.academic,'listClasses',{actorUserId}),rpcHttp(clients.marks,'listAssessments',{actorUserId}),rpcHttp(clients.attendance,'getLowAttendance',{actorUserId})]);
   const classRows=items(classes); const assessmentRows=items(assessments); const lowRows=items(low);
-  const studentTotal=classRows.length?Number((await rpcHttp(clients.academic,'getClassRoster',{actorUserId,classSubjectId:classRows[0].class_subject_id})).items?.length||0):0;
+  // M-4 fix: sum students across ALL assigned classes, not just the first one.
+  let studentTotal = 0;
+  if (classRows.length) {
+    const rosterCounts = await Promise.all(
+      classRows.map(c => rpcHttp(clients.academic,'getClassRoster',{actorUserId,classSubjectId:c.class_subject_id})
+        .then(r => Number(r.items?.length || 0))
+        .catch(() => 0)
+      )
+    );
+    studentTotal = rosterCounts.reduce((sum, n) => sum + n, 0);
+  }
   res.json({assignedSubjects:classRows.length,studentsAcrossClasses:studentTotal,marksToFinalize:assessmentRows.filter(a=>a.status!=='PUBLISHED').length,lowAttendanceFlags:lowRows.length});
 }));
 api.get('/teacher/classes', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>{
@@ -205,7 +251,9 @@ api.get('/teacher/marks/current', authenticate, requireUser(['TEACHER']), wrap(a
   res.json(items(r).map(x=>({studentId:x.studentId,rollNo:x.rollNo,studentName:x.studentName,enteredMarks:x.enteredMarks===null?'':String(x.enteredMarks),pdfMarks:null,maxMarks:Number(x.maxMarks),status:'not_found',confirmed:false,overrideReason:''})));
 }));
 api.post('/teacher/assessments/:assessmentId/marks/bulk', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>res.json(await rpcHttp(clients.marks,'enterBulkMarks',{...req.body,actorUserId:req.auth.userId,assessmentId:req.params.assessmentId}))));
-api.post('/teacher/marks/pdf-validation/preview', authenticate, requireUser(['TEACHER']), upload.single('file'), wrap(async(req,res)=>{
+// M-5 + L-3 fix: rate-limit PDF upload and OCR preview endpoints to prevent DoS via PDF bombs.
+const pdfUploadLimit = rateLimit({windowMs:60*1000,limit:10,standardHeaders:true,legacyHeaders:false,message:{error:'Too many PDF uploads. Please wait before uploading again.'}});
+api.post('/teacher/marks/pdf-validation/preview', authenticate, requireUser(['TEACHER']), pdfUploadLimit, upload.single('file'), wrap(async(req,res)=>{
   if(!req.file) return res.status(400).json({error:'PDF file is required'});
   if(req.file.mimetype!=='application/pdf'&&!req.file.originalname.toLowerCase().endsWith('.pdf')) return res.status(400).json({error:'Only PDF files are supported'});
   if(req.file.buffer.subarray(0,5).toString()!=='%PDF-') return res.status(400).json({error:'The uploaded file does not have a valid PDF signature'});
@@ -214,10 +262,15 @@ api.post('/teacher/marks/pdf-validation/preview', authenticate, requireUser(['TE
   let uploaded=null;
   try {
     if(cloudinaryConfigured()) uploaded=await uploadAuthenticatedBuffer(req.file,process.env.CLOUDINARY_MARKS_FOLDER||'college-erp/marks-validation','image');
-    const result=await rpcHttp(clients.marks,'validateMarksPdf',{actorUserId:req.auth.userId,assessmentId:req.body.assessmentId,fileName:req.file.originalname,pdfBase64:req.file.buffer.toString('base64'),pdfPublicId:uploaded?.public_id,enteredRows});
-    const rows=result.items.map(x=>formatValidationItem(x,result.maxMarks));
-    res.json({jobId:result.jobId,rows,message:`PDF parsed in ${result.extractionMode} mode. Review every row before saving.`,summary:result.summary,maxMarks:result.maxMarks});
+    const result=await rpcHttp(clients.marks,'queueMarksPdfValidation',{actorUserId:req.auth.userId,assessmentId:req.body.assessmentId,fileName:req.file.originalname,pdfBase64:req.file.buffer.toString('base64'),pdfPublicId:uploaded?.public_id,enteredRows});
+    res.status(202).json({jobId:result.jobId,status:result.status,message:'PDF validation has been queued. This page will update when matching is complete.'});
   } catch(error) { if(uploaded?.public_id) await deleteAuthenticatedAsset(uploaded.public_id,'image').catch(()=>{}); throw error; }
+}));
+api.get('/teacher/marks/pdf-validation/:jobId', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>{
+  const result=await rpcHttp(clients.marks,'getMarkValidation',{actorUserId:req.auth.userId,jobId:req.params.jobId});
+  const assessmentRows=items(await rpcHttp(clients.marks,'getAssessmentMarks',{actorUserId:req.auth.userId,assessmentId:result.job.assessment_id}));
+  const maxMarks=Number(assessmentRows[0]?.maxMarks||0);
+  res.json({job:result.job,rows:result.items.map(x=>formatValidationItem(x,maxMarks)),message:result.job.status==='NEEDS_REVIEW'?'PDF extraction finished. Review every row before saving.':result.job.error_message||null});
 }));
 api.post('/teacher/marks/pdf-validation/confirm', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>{
   const b=req.body||{}; let jobId=b.jobId; let validation;
@@ -292,9 +345,9 @@ api.get('/student/notifications', authenticate, requireUser(['STUDENT']), wrap(a
 }));
 api.patch('/student/notifications/:id/read', authenticate, requireUser(['STUDENT']), wrap(async(req,res)=>res.json(await rpcHttp(clients.notification,'markNotificationRead',{actorUserId:req.auth.userId,notificationId:req.params.id}))));
 
-// Paper uploads: files remain authenticated in Cloudinary; the gateway never returns the API secret.
+// L-3 fix: rate-limit paper uploads as well.
 api.get('/papers', authenticate, requireUser([]), wrap(async(req,res)=>res.json(await getPaperRows(req))));
-api.post('/papers', authenticate, requireUser(['TEACHER']), upload.single('file'), wrap(async(req,res)=>{
+api.post('/papers', authenticate, requireUser(['TEACHER']), pdfUploadLimit, upload.single('file'), wrap(async(req,res)=>{
   if(!req.file) return res.status(400).json({ok:false,message:'PDF file is required'});
   if(req.file.mimetype!=='application/pdf'&&!req.file.originalname.toLowerCase().endsWith('.pdf')) return res.status(400).json({ok:false,message:'Only PDF files are accepted'});
   if(req.file.buffer.subarray(0,5).toString()!=='%PDF-') return res.status(400).json({ok:false,message:'The uploaded file does not have a valid PDF signature'});
@@ -321,7 +374,9 @@ api.post('/profile/avatar', authenticate, requireUser([]), upload.single('file')
   if(!req.file) return res.status(400).json({error:'Image file is required'});
   if(!req.file.mimetype.startsWith('image/')) return res.status(400).json({error:'Only images are accepted'});
   if(req.file.size>5*1024*1024) return res.status(413).json({error:'Profile image must be 5 MB or smaller'});
-  const userId=req.body.userId||req.auth.userId;
+  // H-1 fix: always use the authenticated user's own ID. Ignore req.body.userId to prevent
+  // any user from overwriting another user's avatar by supplying a foreign userId in the body.
+  const userId = req.auth.userId;
   const uploaded=await uploadPublicBuffer(req.file,process.env.CLOUDINARY_PROFILES_FOLDER||'college-erp/profiles','image');
   try {
     const result=await rpcHttp(clients.paper,'updateProfileAsset',{actorUserId:req.auth.userId,userId,cloudinaryPublicId:uploaded.public_id,originalFilename:req.file.originalname,bytesSize:req.file.size});

@@ -14,3 +14,7 @@ export async function safeDelete(key) {
   try { if (isRedisReady()) await redis.del(key); }
   catch (err) { logger.warn({ key, err: err.message }, 'Redis invalidation failed; short TTL limits stale authorization'); }
 }
+export async function safeSet(key, value, options) {
+  try { if (isRedisReady()) await redis.set(key, String(value), options); }
+  catch (err) { logger.warn({ key, err: err.message }, 'Redis write failed'); }
+}

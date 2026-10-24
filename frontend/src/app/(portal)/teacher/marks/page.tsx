@@ -34,6 +34,7 @@ export default function TeacherMarksPage() {
   const [assessmentId, setAssessmentId] = useState(assessments[0].id);
   const [rows, setRows] = useState<MarkRow[]>([]);
   const [fileName, setFileName] = useState("");
+  const [validationJobId, setValidationJobId] = useState("");
   const [extractionMessage, setExtractionMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -68,10 +69,20 @@ export default function TeacherMarksPage() {
       body.append("file", file);
       body.append("assessmentId", assessmentId);
       body.append("maxMarks", String(selectedAssessment.max));
-      const result = await erpApi.previewMarksPdf(body);
-      const normalized = result.rows.map(row => ({ ...row, confirmed: false, overrideReason: "" }));
-      setRows(normalized);
-      setExtractionMessage(result.message ?? "PDF extraction finished. Review every row before saving.");
+      const queued = await erpApi.previewMarksPdf(body);
+      setValidationJobId(queued.jobId);
+      setExtractionMessage(queued.message ?? "PDF validation is queued. Matching marks in the background…");
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const result = await erpApi.getMarksValidation(queued.jobId);
+        if (result.job.status === "PROCESSING") continue;
+        if (result.job.status === "FAILED") throw new Error(result.message || result.job.error_message || "PDF validation failed.");
+        const normalized = result.rows.map(row => ({ ...row, confirmed: false, overrideReason: "" }));
+        setRows(normalized);
+        setExtractionMessage(result.message ?? "PDF extraction finished. Review every row before saving.");
+        return;
+      }
+      throw new Error("PDF validation is still running. Please retry shortly.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "PDF validation failed. Please try again.");
     } finally { setLoading(false); }
@@ -100,6 +111,7 @@ export default function TeacherMarksPage() {
     setSaving(true);
     try {
       const result = await erpApi.confirmMarks({
+        jobId: validationJobId,
         assessmentId,
         sourcePdfName: fileName,
         teacherConfirmed: true,
@@ -113,12 +125,12 @@ export default function TeacherMarksPage() {
   const onFileInput = (event: ChangeEvent<HTMLInputElement>) => { void handlePdf(event.target.files?.[0]); event.target.value = ""; };
 
   return <>
-    <PageHeading eyebrow="ASSESSMENT WORKSPACE" title="Marks & results" description="Extract awarded marks from a PDF, compare the scores you entered, and confirm every record before it is saved." actions={<Button variant="secondary" onClick={() => { setRows([]); setFileName(""); setExtractionMessage(""); setError(""); setSaveMessage(""); }}><XCircle size={15}/> Reset review</Button>} />
+    <PageHeading eyebrow="ASSESSMENT WORKSPACE" title="Marks & results" description="Extract awarded marks from a PDF, compare the scores you entered, and confirm every record before it is saved." actions={<Button variant="secondary" onClick={() => { setRows([]); setFileName(""); setValidationJobId(""); setExtractionMessage(""); setError(""); setSaveMessage(""); }}><XCircle size={15}/> Reset review</Button>} />
 
     <div className="page-two-col">
       <Card title="1. Choose assessment" subtitle="Marks are compared against the matching assessment and its maximum score.">
         <div className="stack" style={{ gap: 15 }}>
-          <div className="field"><label>Assessment *</label><select value={assessmentId} onChange={event => { setAssessmentId(event.target.value); setRows([]); setFileName(""); setExtractionMessage(""); setSaveMessage(""); }}><option value={assessments[0].id}>{assessments[0].label}</option><option value={assessments[1].id}>{assessments[1].label}</option><option value={assessments[2].id}>{assessments[2].label}</option></select></div>
+          <div className="field"><label>Assessment *</label><select value={assessmentId} onChange={event => { setAssessmentId(event.target.value); setRows([]); setFileName(""); setValidationJobId(""); setExtractionMessage(""); setSaveMessage(""); }}><option value={assessments[0].id}>{assessments[0].label}</option><option value={assessments[1].id}>{assessments[1].label}</option><option value={assessments[2].id}>{assessments[2].label}</option></select></div>
           <div className="field-grid"><div className="field"><label>Class / section</label><input readOnly value="SY B.Tech CSE · Division A" /></div><div className="field"><label>Maximum marks</label><input readOnly value={String(selectedAssessment.max)} /></div></div>
           <div className="notice notice-info"><ShieldCheck size={16}/><div><strong>Authorized assessment</strong>Only assigned teachers can validate and submit marks for their subject offering. The backend must verify this even if the UI shows the assignment.</div></div>
         </div>

@@ -57,7 +57,7 @@ service MarksService {
   rpc ListAssessments(JsonRequest) returns (JsonResponse);
   rpc GetAssessmentMarks(JsonRequest) returns (JsonResponse);
   rpc EnterBulkMarks(JsonRequest) returns (JsonResponse);
-  rpc ValidateMarksPdf(JsonRequest) returns (JsonResponse);
+  rpc QueueMarksPdfValidation(JsonRequest) returns (JsonResponse);
   rpc GetMarkValidation(JsonRequest) returns (JsonResponse);
   rpc ConfirmValidatedMarks(JsonRequest) returns (JsonResponse);
   rpc PublishResults(JsonRequest) returns (JsonResponse);

@@ -32,6 +32,11 @@ export async function withTransaction(fn) {
 }
 
 export async function pingDb() {
-  const [rows] = await pool.query('SELECT 1 AS ok');
-  return rows[0]?.ok === 1;
+  try {
+    const [rows] = await pool.query('SELECT 1 AS ok');
+    return rows[0]?.ok === 1;
+  } catch {
+    // Return false instead of throwing — callers must never receive a stack trace from a health probe.
+    return false;
+  }
 }

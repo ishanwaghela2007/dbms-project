@@ -111,5 +111,5 @@ const handlers = {
   }
 };
 
-startGrpcService({name:'academic-service',address:process.env.ACADEMIC_GRPC_ADDR||'127.0.0.1:50053',Service:erpProto.AcademicService,handlers});
+startGrpcService({name:'academic-service',serviceName:'academic',address:process.env.ACADEMIC_GRPC_ADDR||'127.0.0.1:50053',Service:erpProto.AcademicService,handlers});
 logger.info('Academic service initialized');

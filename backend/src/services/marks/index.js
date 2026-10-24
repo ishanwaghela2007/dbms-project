@@ -77,7 +77,7 @@ const handlers = {
       return {assessmentId,saved:records.length};
     });
   },
-  async validateMarksPdf(input) {
+  async queueMarksPdfValidation(input) {
     const { actorUserId, assessmentId, fileName, pdfBase64, enteredRows=[] }=input;
     if(!pdfBase64 || !fileName) throw badRequest('PDF file and filename are required');
     const {assessment}=await requireTeacherForAssessment(actorUserId,assessmentId);
@@ -86,47 +86,15 @@ const handlers = {
     const maxBytes=Number(process.env.MARKS_PDF_MAX_MB||8)*1024*1024;
     if(pdfBuffer.length===0||pdfBuffer.length>maxBytes) throw badRequest(`PDF must be non-empty and at most ${process.env.MARKS_PDF_MAX_MB||8} MB`);
     if(pdfBuffer.subarray(0,5).toString()!=='%PDF-') throw badRequest('Uploaded file is not a valid PDF');
-    const {text,mode}=await extractPdfText(pdfBuffer);
-    const roster=await rosterForAssessment(assessmentId);
-    if(!roster.length) throw badRequest('No active enrolled students found for this assessment');
-    const submitted=new Map();
-    for(const row of enteredRows){
-      const key=row.studentUserId||row.studentId||row.rollNumber||row.rollNo;
-      if(key) submitted.set(String(key),row);
-    }
+    if(!Array.isArray(enteredRows)||enteredRows.length>1000) throw badRequest('enteredRows must contain at most 1000 rows');
     const jobId=randomUUID();
-    await pool.execute(`INSERT INTO mark_validation_jobs (id,assessment_id,teacher_user_id,pdf_public_id,original_filename,status,extraction_mode,error_message) VALUES (?,?,?,?,?, 'PROCESSING',?,?)`,[jobId,assessmentId,actorUserId,input.pdfPublicId||null,String(fileName).slice(0,255),mode,mode==='FAILED'?'PDF text extraction was unavailable; manual review required':null]);
-    const itemRows=[];
-    for(const student of roster){
-      const entered=submitted.get(student.student_user_id)||submitted.get(student.roll_no);
-      const found=findMarksForIdentifier(text,student.roll_no,Number(assessment.max_marks));
-      const enteredMarks=entered && entered.marksEntered!==undefined && entered.marksEntered!=='' ? Number(entered.marksEntered) : null;
-      let status='MANUAL_REVIEW';
-      if(found.ambiguous) status='MANUAL_REVIEW';
-      else if(found.marks===null) status='MARKS_NOT_FOUND';
-      else if(found.marks<0||found.marks>Number(assessment.max_marks)) status='INVALID_RANGE';
-      else if(enteredMarks===null || !Number.isFinite(enteredMarks)) status='MANUAL_REVIEW';
-      else if(Math.abs(found.marks-enteredMarks)<0.001) status='MATCH';
-      else status='MISMATCH';
-      const id=randomUUID();
-      await pool.execute(`INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,page_number,confidence,evidence_text,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,[id,jobId,student.student_user_id,student.roll_no,Number.isFinite(enteredMarks)?enteredMarks:null,found.marks,Number.isFinite(enteredMarks)?enteredMarks:null,found.pageNumber,found.confidence,found.evidence||null,status]);
-      itemRows.push({id,studentUserId:student.student_user_id,studentName:student.full_name,rollNumber:student.roll_no,enteredMarks:Number.isFinite(enteredMarks)?enteredMarks:null,extractedMarks:found.marks,pageNumber:found.pageNumber,confidence:found.confidence,status,confirmed:false});
-    }
-    // Extra teacher-entered IDs not found in the roster are visible and must be mapped or removed by review.
-    const rosterKeys=new Set(roster.flatMap(r=>[r.student_user_id,r.roll_no]));
-    for(const [key,row] of submitted.entries()){
-      if(rosterKeys.has(key)) continue;
-      const id=randomUUID(); const enteredMarks=Number(row.marksEntered);
-      await pool.execute(`INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,status) VALUES (?,?,NULL,?,?,NULL,?,'STUDENT_NOT_MATCHED')`,[id,jobId,String(row.rollNumber||row.rollNo||key).slice(0,100),Number.isFinite(enteredMarks)?enteredMarks:null,Number.isFinite(enteredMarks)?enteredMarks:null]);
-      itemRows.push({id,studentUserId:null,studentName:null,rollNumber:String(row.rollNumber||row.rollNo||key),enteredMarks:Number.isFinite(enteredMarks)?enteredMarks:null,extractedMarks:null,pageNumber:null,confidence:0,status:'STUDENT_NOT_MATCHED',confirmed:false});
-    }
-    await pool.execute(`UPDATE mark_validation_jobs SET status='NEEDS_REVIEW' WHERE id=?`,[jobId]);
-    return {jobId,assessmentId,extractionMode:mode,status:'NEEDS_REVIEW',maxMarks:Number(assessment.max_marks),total:itemRows.length,summary:itemRows.reduce((a,r)=>(a[r.status]=(a[r.status]||0)+1,a),{}),items:itemRows};
+    await pool.execute(`INSERT INTO mark_validation_jobs (id,assessment_id,teacher_user_id,pdf_public_id,original_filename,status,input_pdf,entered_rows_json) VALUES (?,?,?,?,?,'PROCESSING',?,?)`,[jobId,assessmentId,actorUserId,input.pdfPublicId||null,String(fileName).slice(0,255),pdfBuffer,JSON.stringify(enteredRows)]);
+    return {jobId,assessmentId,status:'PROCESSING'};
   },
   async getMarkValidation(input) {
     let jobs;
     if (input.jobId) [jobs] = await pool.execute('SELECT * FROM mark_validation_jobs WHERE id=?',[input.jobId]);
-    else if (input.assessmentId) [jobs] = await pool.execute(`SELECT * FROM mark_validation_jobs WHERE assessment_id=? AND teacher_user_id=? AND status IN ('NEEDS_REVIEW','CONFIRMED') ORDER BY created_at DESC LIMIT 1`,[input.assessmentId,input.actorUserId]);
+    else if (input.assessmentId) [jobs] = await pool.execute(`SELECT * FROM mark_validation_jobs WHERE assessment_id=? AND teacher_user_id=? ORDER BY created_at DESC LIMIT 1`,[input.assessmentId,input.actorUserId]);
     else throw badRequest('jobId or assessmentId is required');
     const job=jobs[0]; if(!job) throw notFound('Validation job not found');
     const actor=await actorRow(input.actorUserId); if(!actor?.is_active || (!actor.is_admin && job.teacher_user_id!==input.actorUserId)) throw forbidden('Cannot view this validation job');
@@ -140,6 +108,8 @@ const handlers = {
       const [jobs]=await conn.execute('SELECT * FROM mark_validation_jobs WHERE id=? FOR UPDATE',[jobId]); const job=jobs[0]; if(!job) throw notFound('Validation job not found');
       const {actor,assessment}=await requireTeacherForAssessment(actorUserId,job.assessment_id,conn);
       if(!actor.is_admin&&job.teacher_user_id!==actorUserId) throw forbidden('Only the validating teacher can confirm these marks');
+      if(job.status==='PROCESSING') throw badRequest('PDF validation is still processing');
+      if(job.status==='FAILED') throw badRequest('PDF validation failed; upload the document again');
       if(job.status==='CONFIRMED') throw badRequest('This validation job has already been confirmed');
       if(assessment.status==='PUBLISHED') throw forbidden('Published marks cannot be changed');
       const [existing]=await conn.execute('SELECT * FROM mark_validation_items WHERE job_id=? FOR UPDATE',[jobId]);
@@ -161,13 +131,50 @@ const handlers = {
         if(item.status==='STUDENT_NOT_MATCHED' && !d.studentUserId) throw badRequest('Unmatched PDF row must be mapped to a student');
         const id=randomUUID();
         await conn.execute(`INSERT INTO marks (id,assessment_id,student_user_id,marks_obtained,entered_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained),updated_by_user_id=VALUES(updated_by_user_id)`,[id,job.assessment_id,studentId,finalMarks,actorUserId,actorUserId]);
-        await conn.execute(`UPDATE mark_validation_items SET student_user_id=?,final_marks=?,confirmed=1,override_reason=? WHERE id=?`,[studentId,finalMarks,(d.overrideReason||'').trim()||null,item.id]);
-        saved++;
+        await conn.execute(`UPDATE mark_validation_items SET student_user_id=?,final_marks=?,confirmed=1,override_reason=? WHERE id=?`,[studentId,finalMarks,(d.overrideReason||'').trim()||null,item.id]); saved++;
       }
       await conn.execute(`UPDATE mark_validation_jobs SET status='CONFIRMED',confirmed_at=CURRENT_TIMESTAMP WHERE id=?`,[jobId]);
       await conn.execute('DELETE FROM marks_audit_context WHERE connection_id=CONNECTION_ID()');
       return {jobId,status:'CONFIRMED',saved};
     });
+  },
+  async __processQueuedValidation(job) {
+    const [assessmentRows]=await pool.execute('SELECT max_marks,status FROM assessments WHERE id=?',[job.assessment_id]);
+    const assessment=assessmentRows[0]; if(!assessment||assessment.status==='PUBLISHED') throw new Error('Assessment is unavailable for validation');
+    const roster=await rosterForAssessment(job.assessment_id); if(!roster.length) throw new Error('No active enrolled students found for this assessment');
+    const {text,mode}=await extractPdfText(Buffer.from(job.input_pdf));
+    const enteredRows=typeof job.entered_rows_json==='string'?JSON.parse(job.entered_rows_json):job.entered_rows_json||[];
+    const submitted=new Map();
+    for(const row of enteredRows){
+      const key=row.studentUserId||row.studentId||row.rollNumber||row.rollNo;
+      if(key) submitted.set(String(key),row);
+    }
+    const itemRows=[];
+    for(const student of roster){
+      const entered=submitted.get(student.student_user_id)||submitted.get(student.roll_no);
+      const found=findMarksForIdentifier(text,student.roll_no,Number(assessment.max_marks));
+      const enteredMarks=entered && entered.marksEntered!==undefined && entered.marksEntered!=='' ? Number(entered.marksEntered) : null;
+      let status='MANUAL_REVIEW';
+      if(found.ambiguous) status='MANUAL_REVIEW';
+      else if(found.marks===null) status='MARKS_NOT_FOUND';
+      else if(found.marks<0||found.marks>Number(assessment.max_marks)) status='INVALID_RANGE';
+      else if(enteredMarks===null || !Number.isFinite(enteredMarks)) status='MANUAL_REVIEW';
+      else if(Math.abs(found.marks-enteredMarks)<0.001) status='MATCH';
+      else status='MISMATCH';
+      const id=randomUUID();
+      await pool.execute(`INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,page_number,confidence,evidence_text,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,[id,job.id,student.student_user_id,student.roll_no,Number.isFinite(enteredMarks)?enteredMarks:null,found.marks,Number.isFinite(enteredMarks)?enteredMarks:null,found.pageNumber,found.confidence,found.evidence||null,status]);
+      itemRows.push({id,studentUserId:student.student_user_id,studentName:student.full_name,rollNumber:student.roll_no,enteredMarks:Number.isFinite(enteredMarks)?enteredMarks:null,extractedMarks:found.marks,pageNumber:found.pageNumber,confidence:found.confidence,status,confirmed:false});
+    }
+    // Extra teacher-entered IDs not found in the roster are visible and must be mapped or removed by review.
+    const rosterKeys=new Set(roster.flatMap(r=>[r.student_user_id,r.roll_no]));
+    for(const [key,row] of submitted.entries()){
+      if(rosterKeys.has(key)) continue;
+      const id=randomUUID(); const enteredMarks=Number(row.marksEntered);
+      await pool.execute(`INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,status) VALUES (?,?,NULL,?,?,NULL,?,'STUDENT_NOT_MATCHED')`,[id,job.id,String(row.rollNumber||row.rollNo||key).slice(0,100),Number.isFinite(enteredMarks)?enteredMarks:null,Number.isFinite(enteredMarks)?enteredMarks:null]);
+      itemRows.push({id,studentUserId:null,studentName:null,rollNumber:String(row.rollNumber||row.rollNo||key),enteredMarks:Number.isFinite(enteredMarks)?enteredMarks:null,extractedMarks:null,pageNumber:null,confidence:0,status:'STUDENT_NOT_MATCHED',confirmed:false});
+    }
+    await pool.execute(`UPDATE mark_validation_jobs SET status='NEEDS_REVIEW',extraction_mode=?,error_message=?,input_pdf=NULL,entered_rows_json=NULL,worker_locked_at=NULL,completed_at=UTC_TIMESTAMP() WHERE id=?`,[mode,mode==='FAILED'?'PDF text extraction was unavailable; manual review required':null,job.id]);
+    return {total:itemRows.length};
   },
   async publishResults(input) {
     const {actor,assessment}=await requireTeacherForAssessment(input.actorUserId,input.assessmentId);
@@ -188,5 +195,28 @@ const handlers = {
   }
 };
 
-startGrpcService({name:'marks-service',address:process.env.MARKS_GRPC_ADDR||'127.0.0.1:50054',Service:erpProto.MarksService,handlers});
+async function processNextValidationJob() {
+  const conn=await pool.getConnection(); let job;
+  try {
+    await conn.beginTransaction();
+    const [jobs]=await conn.query(`SELECT * FROM mark_validation_jobs WHERE status='PROCESSING' AND input_pdf IS NOT NULL AND (worker_locked_at IS NULL OR worker_locked_at<DATE_SUB(UTC_TIMESTAMP(),INTERVAL 5 MINUTE)) ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`);
+    job=jobs[0];
+    if(job) await conn.execute(`UPDATE mark_validation_jobs SET attempts=attempts+1,worker_locked_at=UTC_TIMESTAMP() WHERE id=?`,[job.id]);
+    await conn.commit();
+  } catch(error) { await conn.rollback().catch(()=>{}); throw error; } finally { conn.release(); }
+  if(!job) return;
+  try {
+    await handlers.__processQueuedValidation(job);
+    logger.info({jobId:job.id},'Completed marks validation background job');
+  } catch(error) {
+    const retry=Number(job.attempts)<2;
+    await pool.execute(`UPDATE mark_validation_jobs SET status=?,worker_locked_at=NULL,error_message=? WHERE id=?`,[retry?'PROCESSING':'FAILED',String(error.message).slice(0,500),job.id]);
+    logger.error({jobId:job.id,err:error.message,retry},'Marks validation background job failed');
+  }
+}
+
+const { __processQueuedValidation, ...grpcHandlers } = handlers;
+startGrpcService({name:'marks-service',serviceName:'marks',address:process.env.MARKS_GRPC_ADDR||'127.0.0.1:50054',Service:erpProto.MarksService,handlers:grpcHandlers});
+setInterval(()=>{processNextValidationJob().catch(error=>logger.error({err:error.message},'Marks background worker failed'));},Number(process.env.MARKS_WORKER_POLL_MS||1000)).unref();
+processNextValidationJob().catch(error=>logger.warn({err:error.message},'Initial marks background worker poll failed'));
 logger.info('Marks service initialized');

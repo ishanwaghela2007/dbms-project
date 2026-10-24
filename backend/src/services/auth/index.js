@@ -2,12 +2,12 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { pool } from '../../shared/db.js';
-import { safeDelete } from '../../shared/redis.js';
+import { safeDelete, safeSet } from '../../shared/redis.js';
 import { config } from '../../config/env.js';
 import { erpProto, startGrpcService } from '../../shared/grpc.js';
 import { badRequest, forbidden, notFound } from '../../shared/errors.js';
 import { logger } from '../../shared/logger.js';
-import { sendForgotPasswordMail, sendInvitationMail, sendVerificationMail } from '../../shared/mailer.js';
+import { enqueueEmail } from '../../shared/email-outbox.js';
 
 function publicUser(row) {
   return { id: row.id, email: row.email, fullName: row.full_name, accountType: row.account_type, is_admin: Boolean(row.is_admin), is_active: Boolean(row.is_active), mustSetPassword: Boolean(row.must_set_password), avatar_public_id: row.avatar_public_id || undefined };
@@ -32,7 +32,9 @@ const handlers = {
       }
       const error = new Error('Account is inactive'); error.grpcCode = 7; error.publicMessage = 'Account is inactive'; throw error;
     }
-    const accessToken = jwt.sign({ sub: user.id }, config.jwtSecret, { issuer: config.jwtIssuer, audience: config.jwtAudience, expiresIn: config.jwtAccessTtl });
+    const authVersion=Number(user.auth_version||1);
+    await safeSet(`authz:version:${user.id}`,authVersion,{EX:Math.max(60,Number(process.env.AUTHZ_VERSION_TTL_SECONDS||86400))});
+    const accessToken = jwt.sign({ sub:user.id, email:user.email, fullName:user.full_name, accountType:user.account_type, isAdmin:Boolean(user.is_admin), active:Boolean(user.is_active), authVersion }, config.jwtSecret, { issuer: config.jwtIssuer, audience: config.jwtAudience, expiresIn: config.jwtAccessTtl });
     return { accessToken, tokenType: 'Bearer', expiresIn: config.jwtAccessTtl, user: publicUser(user) };
   },
   async getAuthorization({ userId }) {
@@ -57,9 +59,6 @@ const handlers = {
     if (accountType === 'ADMIN' && isAdmin !== true) throw badRequest('ADMIN accounts must be explicitly provisioned with is_admin=true');
     const id = randomUUID();
     const mustSetPassword = !password;
-    if (mustSetPassword && process.env.NODE_ENV === 'production' && (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL)) {
-      throw badRequest('Production account provisioning requires an invitation email provider configuration');
-    }
     const inviteToken = mustSetPassword ? randomBytes(32).toString('base64url') : null;
     const passwordToHash = password || randomBytes(48).toString('base64url');
     const hash = await bcrypt.hash(String(passwordToHash), 12);
@@ -67,15 +66,8 @@ const handlers = {
     if (inviteToken) {
       await pool.execute('INSERT INTO user_invitations (id,user_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 24 HOUR))', [randomUUID(), id, createHash('sha256').update(inviteToken).digest('hex')]);
       const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
-      const mailRes = await sendInvitationMail({ to: normalizedEmail, fullName: String(fullName).trim(), inviteUrl, role: accountType }).catch(err => ({ success: false, error: err.message }));
-      if (mailRes?.success) logger.info({ to: normalizedEmail }, 'Dispatched account invitation email');
-      else logger.warn({ to: normalizedEmail, err: mailRes?.error }, 'Invitation email failed to send');
-      if (process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL) {
-        try {
-          const response = await fetch('https://api.resend.com/emails', { method:'POST', headers:{'Authorization':`Bearer ${process.env.RESEND_API_KEY}`,'Content-Type':'application/json'}, body:JSON.stringify({from:process.env.RESEND_FROM_EMAIL,to:[normalizedEmail],subject:'Set up your College ERP account',html:`<p>Hello ${String(fullName).replace(/[<>]/g,'')},</p><p><a href="${inviteUrl}">Set your College ERP password</a>. This link expires in 24 hours.</p>`}) });
-          if (!response.ok) logger.error({status:response.status},'Invitation email provider returned an error');
-        } catch (error) { logger.error({err:error.message},'Could not send account invitation email'); }
-      }
+      const inviteUrl = `${front}/accept-invitation?token=${inviteToken}`;
+      await enqueueEmail({ eventKey: `invitation:${id}:${inviteToken}`, to: normalizedEmail, kind: 'INVITATION', payload: { fullName: String(fullName).trim(), inviteUrl, role: accountType } });
       return { id, email: normalizedEmail, fullName: String(fullName).trim(), accountType, is_admin: accountType === 'ADMIN' && Boolean(isAdmin), is_active: true, mustSetPassword: true, ...(process.env.NODE_ENV === 'production' ? {} : { inviteToken, inviteUrl }) };
     }
     return { id, email: normalizedEmail, fullName: String(fullName).trim(), accountType, is_admin: accountType === 'ADMIN' && Boolean(isAdmin), is_active: true, mustSetPassword: false };
@@ -86,9 +78,9 @@ const handlers = {
     const [rows]=await pool.execute(`SELECT i.id invitation_id,i.user_id,u.email FROM user_invitations i JOIN users u ON u.id=i.user_id WHERE i.token_hash=? AND i.used_at IS NULL AND i.expires_at>UTC_TIMESTAMP() AND u.is_active=1 AND u.must_set_password=1 LIMIT 1`,[tokenHash]);
     const invitation=rows[0]; if(!invitation) throw badRequest('Invitation is invalid, expired, or already used');
     const hash=await bcrypt.hash(password,12);
-    await pool.execute('UPDATE users SET password_hash=?,must_set_password=0 WHERE id=?',[hash,invitation.user_id]);
+    await pool.execute('UPDATE users SET password_hash=?,must_set_password=0,auth_version=auth_version+1 WHERE id=?',[hash,invitation.user_id]);
     await pool.execute('UPDATE user_invitations SET used_at=UTC_TIMESTAMP() WHERE id=?',[invitation.invitation_id]);
-    await safeDelete(`authz:${invitation.user_id}`);
+    await safeDelete(`authz:${invitation.user_id}`); await safeSet(`authz:version:${invitation.user_id}`, 'invalidated',{EX:86400});
     return {success:true,email:invitation.email,message:'Password set. You can now sign in.'};
   },
   async updateUserStatus({ actorUserId, userId, isActive, isAdmin }) {
@@ -111,7 +103,7 @@ const handlers = {
     params.push(userId);
     const [result] = await pool.execute(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
     if (!result.affectedRows) throw notFound('User not found');
-    await safeDelete(`authz:${userId}`);
+    await pool.execute('UPDATE users SET auth_version=auth_version+1 WHERE id=?',[userId]); await safeDelete(`authz:${userId}`); await safeSet(`authz:version:${userId}`, 'invalidated',{EX:86400});
     const [rows] = await pool.execute('SELECT id,email,full_name,account_type,is_admin,is_active,must_set_password FROM users WHERE id = ?', [userId]);
     return publicUser(rows[0]);
   },
@@ -130,8 +122,8 @@ const handlers = {
       );
       const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
       const resetUrl = `${front}/reset-password?token=${resetToken}`;
-      await sendForgotPasswordMail({ to: user.email, fullName: user.full_name, resetUrl }).catch(() => {});
-      logger.info({ email: user.email }, 'Password reset link generated and dispatched');
+      await enqueueEmail({ eventKey: `password-reset:${resetId}`, to: user.email, kind: 'PASSWORD_RESET', payload: { fullName: user.full_name, resetUrl } });
+      logger.info({ email: user.email }, 'Password reset email queued');
       return { ok: true, message: 'Password reset link has been dispatched to your email.', resetToken, resetUrl };
     }
     return { ok: true, message: 'If that email is registered, a password reset link has been dispatched.' };
@@ -148,9 +140,9 @@ const handlers = {
     const reset = rows[0];
     if (!reset) throw badRequest('Reset link is invalid, expired, or has already been used');
     const hash = await bcrypt.hash(password, 12);
-    await pool.execute('UPDATE users SET password_hash=?, must_set_password=0 WHERE id=?', [hash, reset.user_id]);
+    await pool.execute('UPDATE users SET password_hash=?, must_set_password=0, auth_version=auth_version+1 WHERE id=?', [hash, reset.user_id]);
     await pool.execute('UPDATE password_resets SET used_at=UTC_TIMESTAMP() WHERE id=?', [reset.reset_id]);
-    await safeDelete(`authz:${reset.user_id}`);
+    await safeDelete(`authz:${reset.user_id}`); await safeSet(`authz:version:${reset.user_id}`, 'invalidated',{EX:86400});
     logger.info({ userId: reset.user_id }, 'Password reset successfully completed');
     return { ok: true, message: 'Password successfully updated. You may now log in.' };
   },
@@ -163,8 +155,8 @@ const handlers = {
     const match = await bcrypt.compare(String(currentPassword), user.password_hash);
     if (!match) throw badRequest('Current password is incorrect');
     const hash = await bcrypt.hash(newPassword, 12);
-    await pool.execute('UPDATE users SET password_hash=? WHERE id=?', [hash, actorUserId]);
-    await safeDelete(`authz:${actorUserId}`);
+    await pool.execute('UPDATE users SET password_hash=?, auth_version=auth_version+1 WHERE id=?', [hash, actorUserId]);
+    await safeDelete(`authz:${actorUserId}`); await safeSet(`authz:version:${actorUserId}`, 'invalidated',{EX:86400});
     return { ok: true, message: 'Password changed successfully.' };
   },
   async register({ fullName, email, password, accountType = 'STUDENT', departmentId, programId, enrollmentNo, employeeId, autoActivate = true, actorUserId }) {
@@ -244,16 +236,7 @@ const handlers = {
     const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
     const verifyUrl = `${front}/verify-email?token=${verificationToken}`;
 
-    const mailResult = await sendVerificationMail({
-      to: normalizedEmail,
-      fullName: String(fullName).trim(),
-      verifyUrl
-    });
-    if (!mailResult.success) {
-      logger.warn({ to: normalizedEmail, err: mailResult.error }, 'Failed to send verification email');
-    } else {
-      logger.info({ to: normalizedEmail }, 'Dispatched verification email successfully');
-    }
+    await enqueueEmail({ eventKey: `verify:${id}:${verificationToken}`, to: normalizedEmail, kind: 'VERIFY_EMAIL', payload: { fullName: String(fullName).trim(), verifyUrl } });
 
     return {
       success: true,
@@ -320,14 +303,7 @@ const handlers = {
     const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
     const verifyUrl = `${front}/verify-email?token=${verificationToken}`;
 
-    const mailResult = await sendVerificationMail({
-      to: normalizedEmail,
-      fullName: user.full_name,
-      verifyUrl
-    });
-    if (!mailResult.success) {
-      logger.warn({ to: normalizedEmail, err: mailResult.error }, 'Failed to resend verification email');
-    }
+    await enqueueEmail({ eventKey: `verify:${user.id}:${verificationToken}`, to: normalizedEmail, kind: 'VERIFY_EMAIL', payload: { fullName: user.full_name, verifyUrl } });
 
     return {
       success: true,
@@ -338,7 +314,7 @@ const handlers = {
   },
 };
 
-startGrpcService({ name: 'auth-service', address: process.env.AUTH_GRPC_ADDR || '127.0.0.1:50051', Service: erpProto.AuthService, handlers });
+startGrpcService({ name: 'auth-service', serviceName: 'auth', address: process.env.AUTH_GRPC_ADDR || '127.0.0.1:50051', Service: erpProto.AuthService, handlers });
 
 // Bootstrap via `npm run db:seed-admin`; services do not silently grant admin rights at startup.
 logger.info('Auth service initialized');

@@ -4,6 +4,16 @@ A service-oriented backend starter for the College ERP frontend. It uses Express
 
 > **Scope and status:** This is a starter codebase intended for local development and integration with the companion Next.js frontend. JavaScript syntax checks and focused unit tests are provided. Full production readiness still requires environment-specific end-to-end testing, Cloudinary configuration, OCR dependencies, database verification, and security review. Do not deploy with development credentials.
 
+> [!CAUTION]
+> **Credential Rotation Required** — Live secrets were previously committed to this repository's git history. You **must** rotate all of the following before this project goes anywhere near production or a shared git remote:
+>
+> 1. **Cloudinary API Secret** — revoke at <https://console.cloudinary.com/settings/api-keys> and generate a new one.
+> 2. **Gmail App Password** — revoke at <https://myaccount.google.com/apppasswords> and generate a new one.
+> 3. **JWT_SECRET** — generate a new random secret: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
+> 4. **SERVICE_AUTH_SECRET** — same command as above, different value.
+> 5. Paste all new values into `.env` (which is git-ignored).
+> 6. To scrub the history: `npx -y @github-tools/git-filter-repo --path backend/.env --invert-paths` or use [BFG Repo-Cleaner](https://rtyley.github.io/bfg-repo-cleaner/).
+
 ## Architecture
 
 - `src/gateway/`: Express REST API, JWT verification, authorization middleware, gRPC clients, file uploads, and Cloudinary helpers.
