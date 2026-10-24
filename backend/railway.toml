@@ -1,108 +1,49 @@
-# railway.toml — College ERP monorepo backend
-# Deploy each [[services]] block as a separate Railway service.
-# Railway reads this from the repo root; point each service at backend/ as the
-# root directory in the Railway dashboard → Settings → Root Directory.
+# railway.toml — College ERP Backend
 #
-# HOW TO USE:
-#   1. railway login
-#   2. railway link  (select / create project)
-#   3. For each service, run:
-#        railway service create <name>
-#        railway variables set ... (see RAILWAY_ENV_VARS.md)
-#        railway up --service <name>
-#   OR use the dashboard "New Service → GitHub Repo" flow and set:
-#        Root Directory  = backend
-#        Start Command   = (see per-service commands below)
+# Railway deploys ONE service per repo link. To deploy all 8 services:
+#
+#  1. In the Railway dashboard, create a NEW SERVICE for each one from the same
+#     GitHub repo (ishanwaghela2007/dbms-project).
+#  2. For each service set:
+#       Root Directory  = backend
+#       Start Command   = (see table below)
+#  3. Set the env vars from RAILWAY_ENV_VARS.md in each service's Variables tab.
+#
+#  Service start commands:
+#    gateway      → node src/gateway/server.js
+#    auth         → node src/services/auth/index.js
+#    profile      → node src/services/profile/index.js
+#    academic     → node src/services/academic/index.js
+#    marks        → node src/services/marks/index.js
+#    attendance   → node src/services/attendance/index.js
+#    paper        → node src/services/paper/index.js
+#    notification → node src/services/notification/index.js
+#
+# This file controls the GATEWAY service (the public-facing one).
+# Override startCommand in each service's Railway dashboard settings.
 
+# ── Build ──────────────────────────────────────────────────────────────────────
 [build]
-builder      = "DOCKERFILE"
+builder        = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
-# ── Gateway ────────────────────────────────────────────────────────────────────
-[[services]]
-name         = "gateway"
-startCommand = "node src/gateway/server.js"
+# ── Deploy ─────────────────────────────────────────────────────────────────────
+[deploy]
+# Gateway listens on $PORT (injected by Railway). All other services listen on
+# their gRPC port set via AUTH_GRPC_ADDR / PROFILE_GRPC_ADDR etc.
+startCommand   = "node src/gateway/server.js"
 
-[services.env]
-SERVICE_NAME          = "gateway"
-NODE_ENV              = "production"
-TRUST_PROXY           = "1"          # Railway sits behind a proxy
-REQUIRE_HTTPS         = "true"
-GRPC_SECURITY_MODE    = "insecure"   # upgrade to mtls when you add TLS certs
+# Run schema migration before each gateway deployment goes live.
+# This is safe because migrate.js uses CREATE TABLE IF NOT EXISTS / ALTER IGNORE.
+preDeployCommand = "node database/migrate.js"
 
-# ── Auth ───────────────────────────────────────────────────────────────────────
-[[services]]
-name         = "auth"
-startCommand = "node src/services/auth/index.js"
+# Railway calls GET /health every 30s; 2xx = healthy, anything else = restart.
+healthcheckPath    = "/health"
+healthcheckTimeout = 120
 
-[services.env]
-SERVICE_NAME          = "auth"
-NODE_ENV              = "production"
-AUTH_GRPC_ADDR        = "0.0.0.0:50051"
-GRPC_SECURITY_MODE    = "insecure"
+# Restart on crash, up to 5 times before Railway marks the deployment failed.
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 5
 
-# ── Profile ────────────────────────────────────────────────────────────────────
-[[services]]
-name         = "profile"
-startCommand = "node src/services/profile/index.js"
-
-[services.env]
-SERVICE_NAME          = "profile"
-NODE_ENV              = "production"
-PROFILE_GRPC_ADDR     = "0.0.0.0:50052"
-GRPC_SECURITY_MODE    = "insecure"
-
-# ── Academic ───────────────────────────────────────────────────────────────────
-[[services]]
-name         = "academic"
-startCommand = "node src/services/academic/index.js"
-
-[services.env]
-SERVICE_NAME          = "academic"
-NODE_ENV              = "production"
-ACADEMIC_GRPC_ADDR    = "0.0.0.0:50053"
-GRPC_SECURITY_MODE    = "insecure"
-
-# ── Marks ──────────────────────────────────────────────────────────────────────
-[[services]]
-name         = "marks"
-startCommand = "node src/services/marks/index.js"
-
-[services.env]
-SERVICE_NAME          = "marks"
-NODE_ENV              = "production"
-MARKS_GRPC_ADDR       = "0.0.0.0:50054"
-GRPC_SECURITY_MODE    = "insecure"
-
-# ── Attendance ─────────────────────────────────────────────────────────────────
-[[services]]
-name         = "attendance"
-startCommand = "node src/services/attendance/index.js"
-
-[services.env]
-SERVICE_NAME          = "attendance"
-NODE_ENV              = "production"
-ATTENDANCE_GRPC_ADDR  = "0.0.0.0:50055"
-GRPC_SECURITY_MODE    = "insecure"
-
-# ── Paper ──────────────────────────────────────────────────────────────────────
-[[services]]
-name         = "paper"
-startCommand = "node src/services/paper/index.js"
-
-[services.env]
-SERVICE_NAME          = "paper"
-NODE_ENV              = "production"
-PAPER_GRPC_ADDR       = "0.0.0.0:50056"
-GRPC_SECURITY_MODE    = "insecure"
-
-# ── Notification ───────────────────────────────────────────────────────────────
-[[services]]
-name         = "notification"
-startCommand = "node src/services/notification/index.js"
-
-[services.env]
-SERVICE_NAME          = "notification"
-NODE_ENV              = "production"
-NOTIFICATION_GRPC_ADDR = "0.0.0.0:50057"
-GRPC_SECURITY_MODE    = "insecure"
+# Single replica by default — scale up in the Railway dashboard when needed.
+numReplicas = 1
