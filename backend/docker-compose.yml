@@ -1,4 +1,16 @@
+# ─── College ERP — full local stack ──────────────────────────────────────────
+# Each Node service gets its own dedicated MySQL database on a shared MySQL
+# instance (matches the DATABASE_PER_SERVICE.md spec).
+#
+# Usage:
+#   docker compose up -d          # start the whole stack
+#   docker compose logs -f gateway
+#   docker compose down -v        # wipe everything including volumes
+
 services:
+
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+
   mysql:
     image: mysql:8.4
     restart: unless-stopped
@@ -16,6 +28,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 15
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -23,6 +36,256 @@ services:
       - "6379:6379"
     volumes:
       - erp_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ── Microservices ──────────────────────────────────────────────────────────
+  # All services share the same Dockerfile image; SERVICE_NAME selects the
+  # entrypoint and the database.
+
+  auth:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/auth/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: auth
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_auth
+      SERVICE_MYSQL_PASSWORD: auth_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_auth
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-change-this-secret-32-bytes-minimum}
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      SERVICE_AUTH_TTL: ${SERVICE_AUTH_TTL:-30s}
+      AUTH_GRPC_ADDR: "0.0.0.0:50051"
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    ports:
+      - "50051:50051"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  profile:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/profile/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: profile
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_profile
+      SERVICE_MYSQL_PASSWORD: profile_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_profile
+      REDIS_URL: redis://redis:6379
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      PROFILE_GRPC_ADDR: "0.0.0.0:50052"
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      CLOUDINARY_PROFILES_FOLDER: ${CLOUDINARY_PROFILES_FOLDER:-college-erp/profiles}
+    ports:
+      - "50052:50052"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  academic:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/academic/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: academic
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_academic
+      SERVICE_MYSQL_PASSWORD: academic_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_academic
+      REDIS_URL: redis://redis:6379
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      ACADEMIC_GRPC_ADDR: "0.0.0.0:50053"
+    ports:
+      - "50053:50053"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  marks:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/marks/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: marks
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_marks
+      SERVICE_MYSQL_PASSWORD: marks_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_marks
+      REDIS_URL: redis://redis:6379
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      MARKS_GRPC_ADDR: "0.0.0.0:50054"
+      PDF_OCR_ENABLED: ${PDF_OCR_ENABLED:-true}
+      PDF_MAX_PAGES: ${PDF_MAX_PAGES:-40}
+      MARKS_PDF_MAX_MB: ${MARKS_PDF_MAX_MB:-8}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      CLOUDINARY_MARKS_FOLDER: ${CLOUDINARY_MARKS_FOLDER:-college-erp/marks-validation}
+    ports:
+      - "50054:50054"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  attendance:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/attendance/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: attendance
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_attendance
+      SERVICE_MYSQL_PASSWORD: attendance_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_attendance
+      REDIS_URL: redis://redis:6379
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      ATTENDANCE_GRPC_ADDR: "0.0.0.0:50055"
+      LOW_ATTENDANCE_THRESHOLD: ${LOW_ATTENDANCE_THRESHOLD:-75}
+    ports:
+      - "50055:50055"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  paper:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/paper/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: paper
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_paper
+      SERVICE_MYSQL_PASSWORD: paper_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_paper
+      REDIS_URL: redis://redis:6379
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      PAPER_GRPC_ADDR: "0.0.0.0:50056"
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      CLOUDINARY_PAPERS_FOLDER: ${CLOUDINARY_PAPERS_FOLDER:-college-erp/papers}
+    ports:
+      - "50056:50056"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  notification:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/services/notification/index.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: notification
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_notification
+      SERVICE_MYSQL_PASSWORD: notification_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_notification
+      REDIS_URL: redis://redis:6379
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      NOTIFICATION_GRPC_ADDR: "0.0.0.0:50057"
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    ports:
+      - "50057:50057"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  gateway:
+    build: .
+    restart: unless-stopped
+    command: ["node", "src/gateway/server.js"]
+    environment:
+      NODE_ENV: development
+      SERVICE_NAME: gateway
+      PORT: 4000
+      SERVICE_MYSQL_HOST: mysql
+      SERVICE_MYSQL_PORT: 3306
+      SERVICE_MYSQL_USER: erp_gateway
+      SERVICE_MYSQL_PASSWORD: gateway_dev_change_me
+      SERVICE_MYSQL_DATABASE: college_erp_gateway
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-change-this-secret-32-bytes-minimum}
+      SERVICE_AUTH_SECRET: ${SERVICE_AUTH_SECRET:-local-dev-only-service-auth-secret-change-me}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      DEPLOYED_FRONTEND_ORIGIN: ${DEPLOYED_FRONTEND_ORIGIN:-https://dbms-project-chi-three.vercel.app}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+      # Internal gRPC addresses (container names resolve via Docker DNS)
+      AUTH_GRPC_ADDR: auth:50051
+      PROFILE_GRPC_ADDR: profile:50052
+      ACADEMIC_GRPC_ADDR: academic:50053
+      MARKS_GRPC_ADDR: marks:50054
+      ATTENDANCE_GRPC_ADDR: attendance:50055
+      PAPER_GRPC_ADDR: paper:50056
+      NOTIFICATION_GRPC_ADDR: notification:50057
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      CLOUDINARY_PAPERS_FOLDER: ${CLOUDINARY_PAPERS_FOLDER:-college-erp/papers}
+      CLOUDINARY_MARKS_FOLDER: ${CLOUDINARY_MARKS_FOLDER:-college-erp/marks-validation}
+      CLOUDINARY_PROFILES_FOLDER: ${CLOUDINARY_PROFILES_FOLDER:-college-erp/profiles}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      MARKS_PDF_MAX_MB: ${MARKS_PDF_MAX_MB:-8}
+      LOW_ATTENDANCE_THRESHOLD: ${LOW_ATTENDANCE_THRESHOLD:-75}
+      AUTHZ_CACHE_TTL_SECONDS: ${AUTHZ_CACHE_TTL_SECONDS:-30}
+      TRUST_PROXY: "loopback"
+    ports:
+      - "4000:4000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth:
+        condition: service_started
+      profile:
+        condition: service_started
+      academic:
+        condition: service_started
+      marks:
+        condition: service_started
+      attendance:
+        condition: service_started
+      paper:
+        condition: service_started
+      notification:
+        condition: service_started
+
 volumes:
   erp_mysql:
   erp_redis:
