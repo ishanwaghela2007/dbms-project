@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, CircleAlert, Clock3, FileCheck2, GraduationCap, Plus, UserPlus, Users, UsersRound } from "lucide-react";
+import { ArrowRight, CircleAlert, FileCheck2, GraduationCap, Plus, UserPlus, Users, UsersRound } from "lucide-react";
 import { Card, PageHeading, StatCard, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
 import type { AdminDashboardSummary, Student } from "@/types/erp";
@@ -107,12 +107,48 @@ export default function AdminDashboard() {
       <Card title="Recently registered students" subtitle="Latest student profiles added to the ERP" action={<Link className="mini-link" href="/admin/students">View all <ArrowRight size={13}/></Link>}>
         <div className="table-wrap"><table className="data-table"><thead><tr><th>Student</th><th>Program</th><th>Semester</th><th>Status</th></tr></thead><tbody>{studentRows.slice(0,5).map((student,i)=><tr key={student.id}><td><div className="table-name"><div className={`avatar ${["avatar-blue","avatar-green","avatar-violet","avatar-amber","avatar-rose"][i]}`}>{student.name.split(" ").map(x=>x[0]).join("")}</div><div><strong>{student.name}</strong><small>{student.rollNo}</small></div></div></td><td>{student.program}</td><td>{student.semester}</td><td><StatusPill tone={student.status === "Active" ? "success" : "neutral"}>{student.status}</StatusPill></td></tr>)}</tbody></table>{studentRows.length === 0 && <p className="helper-text">No student records returned yet.</p>}</div>
       </Card>
-      <Card title="Needs your attention" subtitle="Items that may require administrative action" action={<span className="status status-warning">4 pending</span>}>
+      <Card
+        title="Needs your attention"
+        subtitle="Items that may require administrative action"
+        action={
+          summary && summary.attendanceAlerts > 0
+            ? <span className="status status-warning">{summary.attendanceAlerts} alert{summary.attendanceAlerts !== 1 ? "s" : ""}</span>
+            : <span className="status status-neutral">All clear</span>
+        }
+      >
         <div className="list-stack">
-          <div className="list-row"><div className="stat-icon stat-icon-amber" style={{width:34,height:34,margin:0}}><CircleAlert size={17}/></div><div className="list-row-main"><strong>Low attendance follow-ups</strong><p>27 students are below the configured threshold.</p></div><Link href="/admin/attendance-alerts" className="mini-link"><ArrowRight size={15}/></Link></div>
-          <div className="list-row"><div className="stat-icon stat-icon-violet" style={{width:34,height:34,margin:0}}><UsersRound size={17}/></div><div className="list-row-main"><strong>Teacher assignments</strong><p>2 classes still need a subject teacher.</p></div><Link href="/admin/academics" className="mini-link"><ArrowRight size={15}/></Link></div>
-          <div className="list-row"><div className="stat-icon stat-icon-blue" style={{width:34,height:34,margin:0}}><FileCheck2 size={17}/></div><div className="list-row-main"><strong>Results awaiting review</strong><p>1 marksheet validation is not finalized.</p></div><Link href="/teacher/marks" className="mini-link"><ArrowRight size={15}/></Link></div>
-          <div className="list-row"><div className="stat-icon stat-icon-green" style={{width:34,height:34,margin:0}}><Clock3 size={17}/></div><div className="list-row-main"><strong>Faculty availability</strong><p>Next week&apos;s office hours are being updated.</p></div><Link href="/admin/teachers" className="mini-link"><ArrowRight size={15}/></Link></div>
+          <div className="list-row">
+            <div className="stat-icon stat-icon-amber" style={{width:34,height:34,margin:0}}><CircleAlert size={17}/></div>
+            <div className="list-row-main">
+              <strong>Low attendance follow-ups</strong>
+              <p>{summary ? `${summary.attendanceAlerts} student${summary.attendanceAlerts !== 1 ? "s" : ""} below the configured threshold.` : "Loading attendance data…"}</p>
+            </div>
+            <Link href="/admin/attendance-alerts" className="mini-link"><ArrowRight size={15}/></Link>
+          </div>
+          <div className="list-row">
+            <div className="stat-icon stat-icon-violet" style={{width:34,height:34,margin:0}}><UsersRound size={17}/></div>
+            <div className="list-row-main">
+              <strong>Teaching assignments</strong>
+              <p>Assign faculty to subject offerings for the current semester.</p>
+            </div>
+            <Link href="/admin/academics" className="mini-link"><ArrowRight size={15}/></Link>
+          </div>
+          <div className="list-row">
+            <div className="stat-icon stat-icon-blue" style={{width:34,height:34,margin:0}}><FileCheck2 size={17}/></div>
+            <div className="list-row-main">
+              <strong>Results awaiting review</strong>
+              <p>Check the marks board for PDF validations pending confirmation.</p>
+            </div>
+            <Link href="/teacher/marks" className="mini-link"><ArrowRight size={15}/></Link>
+          </div>
+          <div className="list-row">
+            <div className="stat-icon stat-icon-green" style={{width:34,height:34,margin:0}}><GraduationCap size={17}/></div>
+            <div className="list-row-main">
+              <strong>Faculty directory</strong>
+              <p>{summary ? `${summary.facultyMembers} faculty member${summary.facultyMembers !== 1 ? "s" : ""} registered.` : "View all faculty."}</p>
+            </div>
+            <Link href="/admin/teachers" className="mini-link"><ArrowRight size={15}/></Link>
+          </div>
         </div>
       </Card>
     </div>
