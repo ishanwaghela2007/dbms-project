@@ -33,11 +33,15 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use('/api/v1/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use((req,res,next)=>{ req.requestId=randomUUID(); res.setHeader('X-Request-Id',req.requestId); next(); });
 app.use((req,res,next)=>{
+  if (req.path === '/' || req.path === '/health' || req.path === '/healthz' || req.path === '/ready') return next();
   if (!config.requireHttps || req.secure) return next();
   const host=req.get('host');
   if (!host) return res.status(400).json({error:'Host header required'});
   return res.redirect(308, `https://${host}${req.originalUrl}`);
 });
+
+app.get('/', (_req, res) => res.json({ status: 'ok', service: 'college-erp-api-gateway' }));
+app.get('/healthz', (_req, res) => res.status(200).send('OK'));
 
 function wrap(fn) { return (req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next); }
 function payload(req, extras={}) { return { ...(req.body||{}), ...extras, actorUserId:req.auth?.userId }; }
@@ -409,6 +413,6 @@ app.use((err,req,res,_next)=>{
 
 const port=Number(process.env.PORT||4000);
 connectRedis();
-const server=app.listen(port,()=>logger.info({port,environment:config.nodeEnv},'Express API Gateway started'));
+const server=app.listen(port,'0.0.0.0',()=>logger.info({port,environment:config.nodeEnv},'Express API Gateway started'));
 function shutdown(){server.close(()=>process.exit(0));}
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
