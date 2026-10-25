@@ -1,13 +1,15 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
-import { pool } from '../../shared/db.js';
+import { pool, withTransaction } from '../../shared/db.js';
 import { safeDelete, safeSet } from '../../shared/redis.js';
 import { config } from '../../config/env.js';
 import { erpProto, startGrpcService } from '../../shared/grpc.js';
 import { badRequest, forbidden, notFound } from '../../shared/errors.js';
 import { logger } from '../../shared/logger.js';
 import { enqueueEmail } from '../../shared/email-outbox.js';
+import { sendForgotPasswordMail, sendVerificationMail, sendInvitationMail } from '../../shared/mailer.js';
+import { auditUserSecurity } from '../../shared/user-security-audit.js';
 
 function publicUser(row) {
   return { id: row.id, email: row.email, fullName: row.full_name, accountType: row.account_type, is_admin: Boolean(row.is_admin), is_active: Boolean(row.is_active), mustSetPassword: Boolean(row.must_set_password), avatar_public_id: row.avatar_public_id || undefined };
@@ -66,8 +68,8 @@ const handlers = {
     if (inviteToken) {
       await pool.execute('INSERT INTO user_invitations (id,user_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 24 HOUR))', [randomUUID(), id, createHash('sha256').update(inviteToken).digest('hex')]);
       const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
-      const inviteUrl = `${front}/accept-invitation?token=${inviteToken}`;
       await enqueueEmail({ eventKey: `invitation:${id}:${inviteToken}`, to: normalizedEmail, kind: 'INVITATION', payload: { fullName: String(fullName).trim(), inviteUrl, role: accountType } });
+      sendInvitationMail({ to: normalizedEmail, fullName: String(fullName).trim(), inviteUrl, role: accountType }).catch(err => logger.warn({ err: err.message }, 'Direct invitation mail failed'));
       return { id, email: normalizedEmail, fullName: String(fullName).trim(), accountType, is_admin: accountType === 'ADMIN' && Boolean(isAdmin), is_active: true, mustSetPassword: true, ...(process.env.NODE_ENV === 'production' ? {} : { inviteToken, inviteUrl }) };
     }
     return { id, email: normalizedEmail, fullName: String(fullName).trim(), accountType, is_admin: accountType === 'ADMIN' && Boolean(isAdmin), is_active: true, mustSetPassword: false };
@@ -90,22 +92,42 @@ const handlers = {
     if (typeof isActive === 'boolean') { sets.push('is_active = ?'); params.push(isActive); }
     if (typeof isAdmin === 'boolean') { sets.push('is_admin = ?'); params.push(isAdmin); }
     if (!sets.length) throw badRequest('Provide isActive or isAdmin');
-    if (typeof isAdmin === 'boolean' || isActive === false) {
-      const [check] = await pool.execute('SELECT account_type,is_admin,is_active FROM users WHERE id = ?', [userId]);
+
+    const updatedUser = await withTransaction(async conn => {
+      const [check] = await conn.execute(
+        'SELECT id,email,full_name,account_type,is_admin,is_active,must_set_password FROM users WHERE id = ? FOR UPDATE',
+        [userId]
+      );
       if (!check[0]) throw notFound('User not found');
-      if (check[0].account_type !== 'ADMIN' && isAdmin === true) throw badRequest('Set accountType=ADMIN before granting admin access');
-      const willLoseAdmin = Boolean(check[0].is_admin) && (isAdmin === false || isActive === false);
-      if (willLoseAdmin) {
-        const [activeAdmins] = await pool.execute('SELECT COUNT(*) AS total FROM users WHERE is_admin=1 AND is_active=1');
-        if (Number(activeAdmins[0].total) <= 1) throw badRequest('Cannot deactivate or demote the last active administrator');
+      const currentUser = check[0];
+
+      if (typeof isAdmin === 'boolean' || isActive === false) {
+        if (currentUser.account_type !== 'ADMIN' && isAdmin === true) throw badRequest('Set accountType=ADMIN before granting admin access');
+        const willLoseAdmin = Boolean(currentUser.is_admin) && (isAdmin === false || isActive === false);
+        if (willLoseAdmin) {
+          const [activeAdmins] = await conn.execute('SELECT COUNT(*) AS total FROM users WHERE is_admin=1 AND is_active=1');
+          if (Number(activeAdmins[0].total) <= 1) throw badRequest('Cannot deactivate or demote the last active administrator');
+        }
       }
-    }
-    params.push(userId);
-    const [result] = await pool.execute(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
-    if (!result.affectedRows) throw notFound('User not found');
-    await pool.execute('UPDATE users SET auth_version=auth_version+1 WHERE id=?',[userId]); await safeDelete(`authz:${userId}`); await safeSet(`authz:version:${userId}`, 'invalidated',{EX:86400});
-    const [rows] = await pool.execute('SELECT id,email,full_name,account_type,is_admin,is_active,must_set_password FROM users WHERE id = ?', [userId]);
-    return publicUser(rows[0]);
+
+      await auditUserSecurity(conn, userId, {
+        oldValues: { is_admin: currentUser.is_admin, is_active: currentUser.is_active },
+        newValues: {
+          is_admin: typeof isAdmin === 'boolean' ? isAdmin : currentUser.is_admin,
+          is_active: typeof isActive === 'boolean' ? isActive : currentUser.is_active,
+        }
+      });
+
+      const updateParams = [...params, userId];
+      await conn.execute(`UPDATE users SET ${sets.join(', ')}, auth_version=auth_version+1 WHERE id = ?`, updateParams);
+
+      const [rows] = await conn.execute('SELECT id,email,full_name,account_type,is_admin,is_active,must_set_password FROM users WHERE id = ?', [userId]);
+      return rows[0];
+    });
+
+    await safeDelete(`authz:${userId}`);
+    await safeSet(`authz:version:${userId}`, 'invalidated', { EX: 86400 });
+    return publicUser(updatedUser);
   },
   async forgotPassword({ email }) {
     if (!email) throw badRequest('Email address is required');
@@ -121,8 +143,8 @@ const handlers = {
         [resetId, user.id, tokenHash]
       );
       const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
-      const resetUrl = `${front}/reset-password?token=${resetToken}`;
       await enqueueEmail({ eventKey: `password-reset:${resetId}`, to: user.email, kind: 'PASSWORD_RESET', payload: { fullName: user.full_name, resetUrl } });
+      sendForgotPasswordMail({ to: user.email, fullName: user.full_name, resetUrl }).catch(err => logger.warn({ err: err.message }, 'Direct password reset mail failed'));
       logger.info({ email: user.email }, 'Password reset email queued');
       return { ok: true, message: 'Password reset link has been dispatched to your email.', resetToken, resetUrl };
     }
@@ -237,6 +259,7 @@ const handlers = {
     const verifyUrl = `${front}/verify-email?token=${verificationToken}`;
 
     await enqueueEmail({ eventKey: `verify:${id}:${verificationToken}`, to: normalizedEmail, kind: 'VERIFY_EMAIL', payload: { fullName: String(fullName).trim(), verifyUrl } });
+    sendVerificationMail({ to: normalizedEmail, fullName: String(fullName).trim(), verifyUrl }).catch(err => logger.warn({ err: err.message }, 'Direct verification mail failed'));
 
     return {
       success: true,
@@ -264,8 +287,17 @@ const handlers = {
       throw badRequest('Invalid, expired, or already-used verification link. Please request a new verification email.');
     }
 
-    await pool.execute('UPDATE users SET is_active = 1 WHERE id = ?', [verification.user_id]);
-    await pool.execute('UPDATE email_verifications SET used_at = UTC_TIMESTAMP() WHERE id = ?', [verification.verification_id]);
+    await withTransaction(async conn => {
+      const [u] = await conn.execute('SELECT id, is_active, is_admin FROM users WHERE id = ? FOR UPDATE', [verification.user_id]);
+      if (u[0]) {
+        await auditUserSecurity(conn, verification.user_id, {
+          oldValues: { is_active: u[0].is_active, is_admin: u[0].is_admin },
+          newValues: { is_active: 1 }
+        });
+      }
+      await conn.execute('UPDATE users SET is_active = 1 WHERE id = ?', [verification.user_id]);
+      await conn.execute('UPDATE email_verifications SET used_at = UTC_TIMESTAMP() WHERE id = ?', [verification.verification_id]);
+    });
     await safeDelete(`authz:${verification.user_id}`);
 
     logger.info({ email: verification.email }, 'User email verified and account activated');
@@ -304,6 +336,7 @@ const handlers = {
     const verifyUrl = `${front}/verify-email?token=${verificationToken}`;
 
     await enqueueEmail({ eventKey: `verify:${user.id}:${verificationToken}`, to: normalizedEmail, kind: 'VERIFY_EMAIL', payload: { fullName: user.full_name, verifyUrl } });
+    sendVerificationMail({ to: normalizedEmail, fullName: user.full_name, verifyUrl }).catch(err => logger.warn({ err: err.message }, 'Direct resend verification mail failed'));
 
     return {
       success: true,

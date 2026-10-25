@@ -4,6 +4,7 @@ import { erpProto, createJsonClient, rpc, startGrpcService } from '../../shared/
 import { badRequest, forbidden, notFound } from '../../shared/errors.js';
 import { logger } from '../../shared/logger.js';
 import { safeDelete } from '../../shared/redis.js';
+import { auditUserSecurity } from '../../shared/user-security-audit.js';
 
 const authClient = createJsonClient(erpProto.AuthService, process.env.AUTH_GRPC_ADDR || '127.0.0.1:50051', 'auth');
 function like(q) { return `%${String(q || '').trim().replace(/[\\%_]/g, '\\$&')}%`; }
@@ -60,6 +61,15 @@ const handlers = {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+      if (data.isActive !== undefined) {
+        const [u] = await conn.execute('SELECT id, is_active, is_admin FROM users WHERE id = ? FOR UPDATE', [studentId]);
+        if (u[0]) {
+          await auditUserSecurity(conn, studentId, {
+            oldValues: { is_active: u[0].is_active, is_admin: u[0].is_admin },
+            newValues: { is_active: data.isActive }
+          });
+        }
+      }
       for (const [key, value] of Object.entries(data)) {
         if (!allowed[key] || value === undefined) continue;
         await conn.execute(allowed[key], [value, studentId]);
@@ -112,8 +122,23 @@ const handlers = {
       officeLocation: 'UPDATE faculty_profiles SET office_location=? WHERE user_id=?',
     };
     const conn = await pool.getConnection();
-    try { await conn.beginTransaction(); for (const [key,value] of Object.entries(input)) { if (key==='actorUserId'||key==='teacherId'||value===undefined||!fields[key]) continue; await conn.execute(fields[key],[value,input.teacherId]); } await conn.commit(); }
-    catch (err) { await conn.rollback(); throw err; } finally { conn.release(); }
+    try {
+      await conn.beginTransaction();
+      if (input.isActive !== undefined) {
+        const [u] = await conn.execute('SELECT id, is_active, is_admin FROM users WHERE id = ? FOR UPDATE', [input.teacherId]);
+        if (u[0]) {
+          await auditUserSecurity(conn, input.teacherId, {
+            oldValues: { is_active: u[0].is_active, is_admin: u[0].is_admin },
+            newValues: { is_active: input.isActive }
+          });
+        }
+      }
+      for (const [key,value] of Object.entries(input)) {
+        if (key==='actorUserId'||key==='teacherId'||value===undefined||!fields[key]) continue;
+        await conn.execute(fields[key],[value,input.teacherId]);
+      }
+      await conn.commit();
+    } catch (err) { await conn.rollback(); throw err; } finally { conn.release(); }
     if (typeof input.isActive === 'boolean') await safeDelete(`authz:${input.teacherId}`);
     const [updated] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,fp.*,d.name department FROM users u JOIN faculty_profiles fp ON fp.user_id=u.id JOIN departments d ON d.id=fp.department_id WHERE u.id=?`, [input.teacherId]);
     return updated[0];

@@ -2,12 +2,13 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
+import { config } from '../src/config/env.js';
 
 const email=process.env.ADMIN_EMAIL;
 const password=process.env.ADMIN_PASSWORD;
 const fullName=process.env.ADMIN_NAME||'College Administrator';
 if(!email||!password||password==='CHANGE_THIS_TO_A_LONG_UNIQUE_PASSWORD'||password.length<12) throw new Error('Set ADMIN_EMAIL and a unique ADMIN_PASSWORD of at least 12 characters in .env before seeding');
-const db=await mysql.createConnection({host:process.env.MYSQL_HOST||'127.0.0.1',port:Number(process.env.MYSQL_PORT||3306),user:process.env.MYSQL_USER||'erp_user',password:process.env.MYSQL_PASSWORD||'change_me',database:process.env.MYSQL_DATABASE||'college_erp'});
+const db=await mysql.createConnection(config.mysqlUrl ? { uri: config.mysqlUrl, ssl: config.mysqlSsl } : { host: config.mysqlHost, port: config.mysqlPort, user: config.mysqlUser, password: config.mysqlPassword, database: config.mysqlDatabase, ssl: config.mysqlSsl });
 try {
  const normalized=email.trim().toLowerCase(); const [rows]=await db.execute('SELECT id FROM users WHERE email=?',[normalized]);
  if(rows[0]) { console.log(`Admin already exists: ${normalized}; no changes made.`); process.exitCode=0; }

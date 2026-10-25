@@ -35,8 +35,8 @@ async function getTransporter() {
 
 export async function sendMail({ to, subject, html, text }) {
   try {
-    const transport = await getTransporter();
-    const from = process.env.SMTP_FROM || (process.env.SMTP_USER ? `"CampusFlow ERP" <${process.env.SMTP_USER}>` : '"CampusFlow ERP" <no-reply@college.edu>');
+    const rawFrom = process.env.SMTP_FROM || (process.env.SMTP_USER ? `"CampusFlow ERP" <${process.env.SMTP_USER}>` : '"CampusFlow ERP" <no-reply@college.edu>');
+    const from = String(rawFrom).replace(/^['"]|['"]$/g, '').trim();
 
     const info = await transport.sendMail({
       from,

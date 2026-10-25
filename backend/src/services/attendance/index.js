@@ -41,7 +41,40 @@ async function saveRegister(input, {entryMode='MANUAL'}={}) {
     let sessionId;
     if(existing[0]) { if(existing[0].status==='FINALIZED') throw conflict('This attendance session is finalized'); sessionId=existing[0].id; await conn.execute('UPDATE attendance_sessions SET entry_mode=?,marked_by_user_id=? WHERE id=?',[entryMode,actorUserId,sessionId]); }
     else { sessionId=randomUUID(); await conn.execute(`INSERT INTO attendance_sessions (id,class_subject_id,session_date,lecture_no,marked_by_user_id,entry_mode,status) VALUES (?,?,?,?,?,?,'DRAFT')`,[sessionId,classSubjectId,sessionDate,lectureNo,actorUserId,entryMode]); }
-    for(const row of mapped){ const id=randomUUID(); await conn.execute(`INSERT INTO attendance_records (id,session_id,student_user_id,status,marked_by_user_id,remarks) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE status=VALUES(status),marked_by_user_id=VALUES(marked_by_user_id),remarks=VALUES(remarks)`,[id,sessionId,row.studentUserId,row.status,actorUserId,row.remarks]); }
+    
+    const [existingRecords] = await conn.execute(
+      `SELECT id, student_user_id, status FROM attendance_records WHERE session_id = ? FOR UPDATE`,
+      [sessionId]
+    );
+    const existingMap = new Map(existingRecords.map(r => [r.student_user_id, r]));
+
+    for(const row of mapped){
+      const existingRecord = existingMap.get(row.studentUserId);
+      if(existingRecord) {
+        if(existingRecord.status !== row.status) {
+          await conn.execute(
+            `UPDATE attendance_records SET status=?, marked_by_user_id=?, remarks=? WHERE id=?`,
+            [row.status, actorUserId, row.remarks, existingRecord.id]
+          );
+          await conn.execute(
+            `INSERT INTO attendance_audit_logs (attendance_record_id, student_user_id, old_status, new_status, changed_by_user_id)
+             VALUES (?, ?, ?, ?, ?)`,
+            [existingRecord.id, row.studentUserId, existingRecord.status, row.status, actorUserId]
+          );
+        } else {
+          await conn.execute(
+            `UPDATE attendance_records SET marked_by_user_id=?, remarks=? WHERE id=?`,
+            [actorUserId, row.remarks, existingRecord.id]
+          );
+        }
+      } else {
+        const id=randomUUID();
+        await conn.execute(
+          `INSERT INTO attendance_records (id,session_id,student_user_id,status,marked_by_user_id,remarks) VALUES (?,?,?,?,?,?)`,
+          [id,sessionId,row.studentUserId,row.status,actorUserId,row.remarks]
+        );
+      }
+    }
     return {sessionId,classSubjectId,sessionDate,lectureNo,entryMode,status:'DRAFT',saved:mapped.length};
   });
 }
@@ -68,6 +101,17 @@ async function computeLowAttendance({actorUserId,classSubjectId,conn=pool,forFol
     HAVING eligibleSessions > 0 AND attendancePercent < ? ORDER BY attendancePercent,studentName`,[...args,Number(process.env.LOW_ATTENDANCE_THRESHOLD||75)]);
   return rows;
 }
+
+async function recordAppointmentAudit(conn, appointmentId, actorUserId, oldStatus, newStatus) {
+  if (oldStatus !== newStatus) {
+    await conn.execute(
+      `INSERT INTO appointment_audit_logs (appointment_id, actor_user_id, old_status, new_status, changed_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [appointmentId, actorUserId, oldStatus, newStatus]
+    );
+  }
+}
+
 const handlers = {
   async saveAttendanceRegister(input) { return saveRegister(input,{entryMode:'MANUAL'}); },
   async previewAttendanceImport(input) {
@@ -228,6 +272,7 @@ const handlers = {
         const [ps]=await conn.execute('SELECT * FROM teacher_availability_slots WHERE id=? FOR UPDATE',[a.proposed_slot_id]); const proposed=ps[0]; if(!proposed||proposed.status!=='REQUESTED') throw conflict('Proposed slot is no longer available');
         await conn.execute(`UPDATE teacher_availability_slots SET status=CASE WHEN id=? THEN 'AVAILABLE' ELSE 'BOOKED' END WHERE id IN (?,?)`,[a.slot_id,a.slot_id,a.proposed_slot_id]);
         await conn.execute(`UPDATE appointments SET slot_id=proposed_slot_id,proposed_slot_id=NULL,status='CONFIRMED',updated_by_user_id=?,responded_at=UTC_TIMESTAMP() WHERE id=?`,[actor.id,a.id]);
+        await recordAppointmentAudit(conn, a.id, actor.id, a.status, 'CONFIRMED');
         await conn.execute(`UPDATE student_attendance_followups SET status='MEETING_REQUESTED' WHERE id=?`,[a.followup_id]);
         await enqueueNotification({recipientUserId:a.teacher_user_id,eventKey:`meeting-confirmed:${a.id}:teacher`,type:'MEETING_CONFIRMED',title:'Student accepted proposed time',message:'The student accepted your alternative appointment time.',entityType:'APPOINTMENT',entityId:a.id},conn);
         return {id:a.id,status:'CONFIRMED'};
@@ -236,6 +281,7 @@ const handlers = {
       if(action==='COMPLETE'){
         if(a.status!=='CONFIRMED') throw conflict('Only a confirmed appointment can be completed');
         await conn.execute(`UPDATE appointments SET status='COMPLETED',updated_by_user_id=?,responded_at=UTC_TIMESTAMP() WHERE id=?`,[actor.id,a.id]);
+        await recordAppointmentAudit(conn, a.id, actor.id, a.status, 'COMPLETED');
         await conn.execute(`UPDATE student_attendance_followups SET status='RESOLVED' WHERE id=?`,[a.followup_id]);
         await enqueueNotification({recipientUserId:a.student_user_id,eventKey:`meeting-completed:${a.id}:student`,type:'MEETING_COMPLETED',title:'Attendance meeting completed',message:'Your teacher marked the attendance meeting as completed.',entityType:'APPOINTMENT',entityId:a.id},conn);
         return {id:a.id,status:'COMPLETED'};
@@ -245,6 +291,7 @@ const handlers = {
         if(a.status!=='REQUESTED') throw conflict('Accept the proposed alternative from the student portal');
         await conn.execute(`UPDATE teacher_availability_slots SET status='BOOKED' WHERE id=?`,[a.slot_id]);
         await conn.execute(`UPDATE appointments SET status='CONFIRMED',teacher_response=?,meeting_location=?,updated_by_user_id=?,responded_at=UTC_TIMESTAMP() WHERE id=?`,[String(input.responseMessage||'Accepted').slice(0,500),String(input.meetingLocation||'Faculty office').slice(0,255),actor.id,a.id]);
+        await recordAppointmentAudit(conn, a.id, actor.id, a.status, 'CONFIRMED');
         await enqueueNotification({recipientUserId:a.student_user_id,eventKey:`meeting-confirmed:${a.id}:student`,type:'MEETING_CONFIRMED',title:'Meeting confirmed',message:`Your teacher confirmed the appointment. Location: ${input.meetingLocation||'Faculty office'}.`,entityType:'APPOINTMENT',entityId:a.id},conn);
         return {id:a.id,status:'CONFIRMED'};
       }
@@ -252,6 +299,7 @@ const handlers = {
         await conn.execute(`UPDATE teacher_availability_slots SET status='AVAILABLE' WHERE id=? AND starts_at_utc>UTC_TIMESTAMP()`,[a.slot_id]);
         if(a.proposed_slot_id) await conn.execute(`UPDATE teacher_availability_slots SET status='AVAILABLE' WHERE id=? AND starts_at_utc>UTC_TIMESTAMP()`,[a.proposed_slot_id]);
         await conn.execute(`UPDATE appointments SET status='DECLINED',teacher_response=?,updated_by_user_id=?,responded_at=UTC_TIMESTAMP(),proposed_slot_id=NULL WHERE id=?`,[String(input.responseMessage||'Request declined').slice(0,500),actor.id,a.id]);
+        await recordAppointmentAudit(conn, a.id, actor.id, a.status, 'DECLINED');
         await conn.execute(`UPDATE student_attendance_followups SET status='OPEN' WHERE id=?`,[a.followup_id]);
         await enqueueNotification({recipientUserId:a.student_user_id,eventKey:`meeting-declined:${a.id}:student`,type:'MEETING_DECLINED',title:'Meeting request declined',message:String(input.responseMessage||'Your teacher declined the request. Please choose another available time.'),entityType:'APPOINTMENT',entityId:a.id},conn);
         return {id:a.id,status:'DECLINED'};
@@ -264,6 +312,7 @@ const handlers = {
         await conn.execute(`UPDATE teacher_availability_slots SET status='AVAILABLE' WHERE id=? AND status='REQUESTED'`,[a.slot_id]);
         await conn.execute(`UPDATE teacher_availability_slots SET status='REQUESTED' WHERE id=?`,[alt.id]);
         await conn.execute(`UPDATE appointments SET status='RESCHEDULE_PROPOSED',proposed_slot_id=?,teacher_response=?,updated_by_user_id=?,responded_at=UTC_TIMESTAMP() WHERE id=?`,[alt.id,String(input.responseMessage||'Please accept this alternative time').slice(0,500),actor.id,a.id]);
+        await recordAppointmentAudit(conn, a.id, actor.id, a.status, 'RESCHEDULE_PROPOSED');
         await enqueueNotification({recipientUserId:a.student_user_id,eventKey:`meeting-proposed:${a.id}:student`,type:'MEETING_RESCHEDULE_PROPOSED',title:'Alternative meeting time proposed',message:String(input.responseMessage||'Your teacher proposed another time. Review and accept it in your meetings page.'),entityType:'APPOINTMENT',entityId:a.id},conn);
         return {id:a.id,status:'RESCHEDULE_PROPOSED',proposedSlotId:alt.id};
       }
@@ -279,6 +328,7 @@ const handlers = {
       const status=byStudent?'CANCELLED_BY_STUDENT':'CANCELLED_BY_TEACHER';
       await conn.execute(`UPDATE teacher_availability_slots SET status='AVAILABLE' WHERE id IN (?,?) AND starts_at_utc>UTC_TIMESTAMP() AND status IN ('REQUESTED','BOOKED')`,[a.slot_id,a.proposed_slot_id||a.slot_id]);
       await conn.execute('UPDATE appointments SET status=?,updated_by_user_id=?,teacher_response=? WHERE id=?',[status,actor.id,String(input.reason||'Appointment cancelled').slice(0,500),a.id]);
+      await recordAppointmentAudit(conn, a.id, actor.id, a.status, status);
       await conn.execute(`UPDATE student_attendance_followups SET status='OPEN' WHERE id=?`,[a.followup_id]);
       const recipient=byStudent?a.teacher_user_id:a.student_user_id;
       await enqueueNotification({recipientUserId:recipient,eventKey:`meeting-cancelled:${a.id}:${status}`,type:'MEETING_CANCELLED',title:'Appointment cancelled',message:'An appointment has been cancelled.',entityType:'APPOINTMENT',entityId:a.id},conn);

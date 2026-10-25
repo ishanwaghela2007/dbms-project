@@ -60,6 +60,8 @@ service MarksService {
   rpc QueueMarksPdfValidation(JsonRequest) returns (JsonResponse);
   rpc GetMarkValidation(JsonRequest) returns (JsonResponse);
   rpc ConfirmValidatedMarks(JsonRequest) returns (JsonResponse);
+  rpc UpdateMark(JsonRequest) returns (JsonResponse);
+  rpc DeleteMark(JsonRequest) returns (JsonResponse);
   rpc PublishResults(JsonRequest) returns (JsonResponse);
   rpc GetStudentResults(JsonRequest) returns (JsonResponse);
 }

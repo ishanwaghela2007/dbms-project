@@ -21,7 +21,7 @@ const api = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Math.max(1, config.maxUploadMb) * 1024 * 1024, files: 1 } });
 
 app.disable('x-powered-by');
-app.set('trust proxy', config.trustProxy);
+app.set('trust proxy', config.trustProxy !== false ? (config.trustProxy || 1) : 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const allowedFrontendOrigins = [...new Set([
   ...config.frontendOrigin.split(',').map((origin) => origin.trim()).filter(Boolean),
@@ -94,7 +94,12 @@ const registerSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters').max(1024),
   fullName: z.string().min(1).max(180),
   accountType: z.enum(['STUDENT', 'TEACHER', 'ADMIN']).optional(),
-});
+  departmentId: z.string().optional(),
+  programId: z.string().optional(),
+  enrollmentNo: z.string().optional(),
+  employeeId: z.string().optional(),
+  autoActivate: z.boolean().optional(),
+}).passthrough();
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(1024),
   newPassword: z.string().min(8, 'New password must be at least 8 characters').max(1024),
@@ -135,14 +140,14 @@ api.post('/cookie-consents', rateLimit({windowMs:60*60*1000,limit:30,standardHea
   });
   res.status(201).json({recorded:true});
 }));
-api.post('/auth/login', rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:true,legacyHeaders:false,message:{error:'Too many login attempts'}}), validate(loginSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'login',req.body||{}))));
+api.post('/auth/login', rateLimit({windowMs:15*60*1000,limit:120,standardHeaders:true,legacyHeaders:false,message:{error:'Too many login attempts. Please wait a few minutes.'}}), validate(loginSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'login',req.body||{}))));
 api.post('/auth/register', authenticate, requireAdmin, validate(registerSchema), wrap(async(req,res)=>res.status(201).json(await rpcHttp(clients.auth,'register',{...req.body,actorUserId:req.auth.userId}))));
-api.post('/auth/verify-email', rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'verifyEmail',req.body||{}))));
-api.post('/auth/resend-verification', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resendVerification',req.body||{}))));
-api.post('/auth/accept-invitation', rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'acceptInvitation',req.body||{}))));
+api.post('/auth/verify-email', rateLimit({windowMs:15*60*1000,limit:60,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'verifyEmail',req.body||{}))));
+api.post('/auth/resend-verification', rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resendVerification',req.body||{}))));
+api.post('/auth/accept-invitation', rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'acceptInvitation',req.body||{}))));
 api.get('/auth/me', authenticate, requireUser([]), wrap(async(req,res)=>res.json({id:req.user.id,email:req.user.email,name:req.user.fullName,accountType:req.user.accountType,is_admin:req.user.is_admin,is_active:req.user.is_active,avatar_public_id:req.user.avatar_public_id||undefined})));
-api.post('/auth/forgot-password', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'forgotPassword',req.body||{}))));
-api.post('/auth/reset-password', rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:true,legacyHeaders:false}), validate(resetPasswordSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resetPassword',req.body||{}))));
+api.post('/auth/forgot-password', rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false}), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'forgotPassword',req.body||{}))));
+api.post('/auth/reset-password', rateLimit({windowMs:15*60*1000,limit:20,standardHeaders:true,legacyHeaders:false}), validate(resetPasswordSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'resetPassword',req.body||{}))));
 api.patch('/auth/change-password', authenticate, requireUser([]), validate(changePasswordSchema), wrap(async(req,res)=>res.json(await rpcHttp(clients.auth,'changePassword',{actorUserId:req.auth.userId,...req.body}))));
 api.get('/profile/me', authenticate, requireUser([]), wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'getMyProfile',{actorUserId:req.auth.userId}))));
 api.patch('/profile/me', authenticate, requireUser([]), wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'updateMyProfile',{actorUserId:req.auth.userId,...req.body}))));
@@ -251,6 +256,8 @@ api.get('/teacher/marks/current', authenticate, requireUser(['TEACHER']), wrap(a
   res.json(items(r).map(x=>({studentId:x.studentId,rollNo:x.rollNo,studentName:x.studentName,enteredMarks:x.enteredMarks===null?'':String(x.enteredMarks),pdfMarks:null,maxMarks:Number(x.maxMarks),status:'not_found',confirmed:false,overrideReason:''})));
 }));
 api.post('/teacher/assessments/:assessmentId/marks/bulk', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>res.json(await rpcHttp(clients.marks,'enterBulkMarks',{...req.body,actorUserId:req.auth.userId,assessmentId:req.params.assessmentId}))));
+api.put('/teacher/assessments/:assessmentId/marks', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>res.json(await rpcHttp(clients.marks,'updateMark',{...req.body,actorUserId:req.auth.userId,assessmentId:req.params.assessmentId}))));
+api.delete('/teacher/marks/:markId', authenticate, requireUser(['TEACHER']), wrap(async(req,res)=>res.json(await rpcHttp(clients.marks,'deleteMark',{actorUserId:req.auth.userId,markId:req.params.markId}))));
 // M-5 + L-3 fix: rate-limit PDF upload and OCR preview endpoints to prevent DoS via PDF bombs.
 const pdfUploadLimit = rateLimit({windowMs:60*1000,limit:10,standardHeaders:true,legacyHeaders:false,message:{error:'Too many PDF uploads. Please wait before uploading again.'}});
 api.post('/teacher/marks/pdf-validation/preview', authenticate, requireUser(['TEACHER']), pdfUploadLimit, upload.single('file'), wrap(async(req,res)=>{

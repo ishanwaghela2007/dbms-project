@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import mysql from 'mysql2/promise';
+import { config } from '../src/config/env.js';
 
-const db=await mysql.createConnection({host:process.env.MYSQL_HOST||'127.0.0.1',port:Number(process.env.MYSQL_PORT||3306),user:process.env.MYSQL_USER||'erp_user',password:process.env.MYSQL_PASSWORD||'change_me',database:process.env.MYSQL_DATABASE||'college_erp'});
+const db=await mysql.createConnection(config.mysqlUrl ? { uri: config.mysqlUrl, ssl: config.mysqlSsl } : { host: config.mysqlHost, port: config.mysqlPort, user: config.mysqlUser, password: config.mysqlPassword, database: config.mysqlDatabase, ssl: config.mysqlSsl });
 const { randomUUID } = await import('node:crypto');
 async function idBy(query,args){const [r]=await db.execute(query,args);return r[0]?.id;}
 try {

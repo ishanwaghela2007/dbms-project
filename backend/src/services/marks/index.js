@@ -3,6 +3,7 @@ import { pool, withTransaction } from '../../shared/db.js';
 import { erpProto, startGrpcService } from '../../shared/grpc.js';
 import { badRequest, forbidden, notFound } from '../../shared/errors.js';
 import { extractPdfText, findMarksForIdentifier } from './pdf-extract.js';
+import { recordMarkWithAudit, deleteMarkWithAudit, validateMarks } from './marks-audit.js';
 import { logger } from '../../shared/logger.js';
 
 async function actorRow(id, conn = pool) {
@@ -51,7 +52,7 @@ const handlers = {
   },
   async getAssessmentMarks(input) {
     const {actor,assessment}=await requireTeacherForAssessment(input.actorUserId,input.assessmentId);
-    const [rows]=await pool.execute(`SELECT m.student_user_id studentId,sp.enrollment_no rollNo,u.full_name studentName,CAST(m.marks_obtained AS CHAR) enteredMarks,a.max_marks maxMarks FROM assessments a JOIN class_subjects cs ON cs.id=a.class_subject_id JOIN enrollments e ON e.class_section_id=cs.class_section_id AND e.status='ACTIVE' JOIN student_profiles sp ON sp.user_id=e.student_user_id JOIN users u ON u.id=sp.user_id LEFT JOIN marks m ON m.assessment_id=a.id AND m.student_user_id=sp.user_id WHERE a.id=? ORDER BY sp.enrollment_no`,[input.assessmentId]);
+    const [rows]=await pool.execute(`SELECT m.id markId,m.student_user_id studentId,sp.enrollment_no rollNo,u.full_name studentName,CAST(m.marks_obtained AS CHAR) enteredMarks,a.max_marks maxMarks FROM assessments a JOIN class_subjects cs ON cs.id=a.class_subject_id JOIN enrollments e ON e.class_section_id=cs.class_section_id AND e.status='ACTIVE' JOIN student_profiles sp ON sp.user_id=e.student_user_id JOIN users u ON u.id=sp.user_id LEFT JOIN marks m ON m.assessment_id=a.id AND m.student_user_id=sp.user_id WHERE a.id=? ORDER BY sp.enrollment_no`,[input.assessmentId]);
     return {items:rows};
   },
   async enterBulkMarks(input) {
@@ -67,14 +68,47 @@ const handlers = {
       if(!Number.isFinite(Number(row.marks))||Number(row.marks)<0||Number(row.marks)>Number(assessment.max_marks)) throw badRequest(`Marks must be between 0 and ${assessment.max_marks}`);
     }
     return withTransaction(async conn=>{
-      await conn.execute('INSERT INTO marks_audit_context (connection_id,actor_user_id) VALUES (CONNECTION_ID(),?) ON DUPLICATE KEY UPDATE actor_user_id=VALUES(actor_user_id)',[actorUserId]);
       for(const row of records){
-        const id=randomUUID();
-        await conn.execute(`INSERT INTO marks (id,assessment_id,student_user_id,marks_obtained,entered_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?)
-          ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained),updated_by_user_id=VALUES(updated_by_user_id)`,[id,assessmentId,row.studentUserId,Number(row.marks),actorUserId,actorUserId]);
+        await recordMarkWithAudit(conn, {
+          assessmentId,
+          studentUserId: row.studentUserId,
+          marksObtained: Number(row.marks),
+          actorUserId
+        });
       }
-      await conn.execute('DELETE FROM marks_audit_context WHERE connection_id=CONNECTION_ID()');
       return {assessmentId,saved:records.length};
+    });
+  },
+  async updateMark(input) {
+    const { actorUserId, markId, assessmentId, studentUserId, marks } = input;
+    if (!markId && (!assessmentId || !studentUserId)) throw badRequest('markId or (assessmentId and studentUserId) is required');
+    let targetAssessmentId = assessmentId;
+    if (!targetAssessmentId && markId) {
+      const [m] = await pool.execute('SELECT assessment_id FROM marks WHERE id = ?', [markId]);
+      if (!m[0]) throw notFound('Marks record not found');
+      targetAssessmentId = m[0].assessment_id;
+    }
+    const { assessment } = await requireTeacherForAssessment(actorUserId, targetAssessmentId);
+    if (assessment.status === 'PUBLISHED') throw forbidden('Published marks cannot be modified');
+    return withTransaction(async conn => {
+      return recordMarkWithAudit(conn, {
+        markId,
+        assessmentId: targetAssessmentId,
+        studentUserId,
+        marksObtained: marks,
+        actorUserId
+      });
+    });
+  },
+  async deleteMark(input) {
+    const { actorUserId, markId } = input;
+    if (!markId) throw badRequest('markId is required');
+    const [m] = await pool.execute('SELECT assessment_id FROM marks WHERE id = ?', [markId]);
+    if (!m[0]) throw notFound('Marks record not found');
+    const { assessment } = await requireTeacherForAssessment(actorUserId, m[0].assessment_id);
+    if (assessment.status === 'PUBLISHED') throw forbidden('Published marks cannot be deleted');
+    return withTransaction(async conn => {
+      return deleteMarkWithAudit(conn, { markId, actorUserId });
     });
   },
   async queueMarksPdfValidation(input) {
@@ -117,7 +151,6 @@ const handlers = {
       const decisionById=new Map(decisions.map(d=>[d.itemId,d]));
       if(decisionById.size!==existing.length || existing.some(x=>!decisionById.has(x.id))) throw badRequest('Every validation row must be explicitly reviewed');
       const roster=await rosterForAssessment(job.assessment_id,conn); const rosterIds=new Set(roster.map(r=>r.student_user_id));
-      await conn.execute('INSERT INTO marks_audit_context (connection_id,actor_user_id) VALUES (CONNECTION_ID(),?) ON DUPLICATE KEY UPDATE actor_user_id=VALUES(actor_user_id)',[actorUserId]);
       let saved=0;
       for(const item of existing){
         const d=decisionById.get(item.id);
@@ -129,12 +162,16 @@ const handlers = {
         const requiresReason=(item.extracted_marks===null || Number(item.extracted_marks)!==finalMarks || item.status==='STUDENT_NOT_MATCHED');
         if(requiresReason&&String(d.overrideReason||'').trim().length<5) throw badRequest('A meaningful overrideReason is required when extracted marks differ or require manual review');
         if(item.status==='STUDENT_NOT_MATCHED' && !d.studentUserId) throw badRequest('Unmatched PDF row must be mapped to a student');
-        const id=randomUUID();
-        await conn.execute(`INSERT INTO marks (id,assessment_id,student_user_id,marks_obtained,entered_by_user_id,updated_by_user_id) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained),updated_by_user_id=VALUES(updated_by_user_id)`,[id,job.assessment_id,studentId,finalMarks,actorUserId,actorUserId]);
+        
+        await recordMarkWithAudit(conn, {
+          assessmentId: job.assessment_id,
+          studentUserId: studentId,
+          marksObtained: finalMarks,
+          actorUserId
+        });
         await conn.execute(`UPDATE mark_validation_items SET student_user_id=?,final_marks=?,confirmed=1,override_reason=? WHERE id=?`,[studentId,finalMarks,(d.overrideReason||'').trim()||null,item.id]); saved++;
       }
       await conn.execute(`UPDATE mark_validation_jobs SET status='CONFIRMED',confirmed_at=CURRENT_TIMESTAMP WHERE id=?`,[jobId]);
-      await conn.execute('DELETE FROM marks_audit_context WHERE connection_id=CONNECTION_ID()');
       return {jobId,status:'CONFIRMED',saved};
     });
   },

@@ -1,3 +1,19 @@
+-- ============================================================================
+-- LEGACY MYSQL TRIGGERS (REFERENCE ONLY)
+--
+-- TiDB Cloud does not support MySQL triggers. All 8 triggers below have been
+-- refactored into backend application services with transactional integrity:
+-- 1. trg_marks_before_insert   -> backend/src/services/marks/marks-audit.js (validateMarks, recordMarkWithAudit)
+-- 2. trg_marks_before_update   -> backend/src/services/marks/marks-audit.js (validateMarks, recordMarkWithAudit)
+-- 3. trg_marks_after_insert    -> backend/src/services/marks/marks-audit.js (recordMarkWithAudit)
+-- 4. trg_marks_after_update    -> backend/src/services/marks/marks-audit.js (recordMarkWithAudit)
+-- 5. trg_marks_after_delete    -> backend/src/services/marks/marks-audit.js (deleteMarkWithAudit)
+-- 6. trg_user_security_audit   -> backend/src/shared/user-security-audit.js (auditUserSecurity)
+-- 7. trg_attendance_after_update -> backend/src/services/attendance/index.js (saveRegister)
+-- 8. trg_appointment_status_audit -> backend/src/services/attendance/index.js (recordAppointmentAudit)
+--
+-- database/migrate.js automatically skips this file when running on TiDB Cloud.
+-- ============================================================================
 USE college_erp;
 DELIMITER $$
 

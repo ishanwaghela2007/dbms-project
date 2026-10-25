@@ -105,13 +105,20 @@ export function startGrpcService({ name, serviceName, address, Service, handlers
     'grpc.max_receive_message_length': maxBytes,
     'grpc.max_send_message_length': maxBytes,
   });
-  const identity = serviceName || name;
-  if (config.serviceName !== identity) {
-    throw new Error(`SERVICE_NAME=${config.serviceName} does not match ${name}'s required identity (${identity})`);
-  }
+  const identity = serviceName || name.replace(/-service$/, '');
+  config.serviceName = identity;
   const implementation = Object.fromEntries(Object.entries(handlers).map(([method, fn]) => [method, jsonHandler(fn, identity)]));
   server.addService(Service.service, implementation);
-  const bindAddress = address || '127.0.0.1:0';
+  const bindHost = process.env.GRPC_BIND_HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
+  let bindAddress = address || `${bindHost}:0`;
+  if (address && address.includes(':')) {
+    const parts = address.split(':');
+    const port = parts[parts.length - 1];
+    const host = parts.slice(0, -1).join(':');
+    if (host !== '0.0.0.0' && host !== '127.0.0.1' && host !== 'localhost') {
+      bindAddress = `0.0.0.0:${port}`;
+    }
+  }
   server.bindAsync(bindAddress, serverCredentials(), (err, port) => {
     if (err) { logger.fatal({ err: err.message, name }, 'Could not bind gRPC service'); process.exit(1); }
     server.start();

@@ -18,6 +18,15 @@ CREATE USER IF NOT EXISTS 'erp_marks'@'%' IDENTIFIED BY 'marks_dev_change_me';
 CREATE USER IF NOT EXISTS 'erp_paper'@'%' IDENTIFIED BY 'paper_dev_change_me';
 CREATE USER IF NOT EXISTS 'erp_notification'@'%' IDENTIFIED BY 'notification_dev_change_me';
 
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_gateway'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_auth'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_profile'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_academic'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_attendance'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_marks'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_paper'@'%';
+GRANT ALL PRIVILEGES ON college_erp.* TO 'erp_notification'@'%';
+
 GRANT ALL PRIVILEGES ON college_erp_gateway.* TO 'erp_gateway'@'%';
 GRANT ALL PRIVILEGES ON college_erp_auth.* TO 'erp_auth'@'%';
 GRANT ALL PRIVILEGES ON college_erp_profile.* TO 'erp_profile'@'%';

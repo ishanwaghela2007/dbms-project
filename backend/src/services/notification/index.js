@@ -30,29 +30,53 @@ async function deliverBatch() {
   } finally { conn.release(); }
 }
 async function deliverEmailBatch() {
-  const conn=await pool.getConnection();
+  const conn = await pool.getConnection();
+  let events = [];
   try {
     await conn.beginTransaction();
-    const [events]=await conn.query(`SELECT * FROM email_outbox_events WHERE status='PENDING' AND available_at<=UTC_TIMESTAMP() ORDER BY id LIMIT 25 FOR UPDATE SKIP LOCKED`);
-    for(const event of events) await conn.execute(`UPDATE email_outbox_events SET status='PROCESSING',attempts=attempts+1,worker_locked_at=UTC_TIMESTAMP() WHERE id=?`,[event.id]);
-    await conn.commit();
-    for(const event of events) {
-      const payload=typeof event.payload_json==='string'?JSON.parse(event.payload_json):event.payload_json;
-      let result;
-      if(event.email_kind==='PASSWORD_RESET') result=await sendForgotPasswordMail({to:event.recipient_email,...payload});
-      else if(event.email_kind==='VERIFY_EMAIL') result=await sendVerificationMail({to:event.recipient_email,...payload});
-      else if(event.email_kind==='INVITATION') result=await sendInvitationMail({to:event.recipient_email,...payload});
-      else result=await sendNotificationMail({to:event.recipient_email,...payload});
-      if(result?.success) await pool.execute(`UPDATE email_outbox_events SET status='DELIVERED',delivered_at=UTC_TIMESTAMP(),worker_locked_at=NULL,last_error=NULL WHERE id=?`,[event.id]);
-      else throw Object.assign(new Error(result?.error||'Email provider rejected delivery'),{eventId:event.id,attempts:event.attempts});
+    const [rows] = await conn.query(`SELECT * FROM email_outbox_events WHERE (status='PENDING' OR (status='PROCESSING' AND worker_locked_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE))) AND available_at <= UTC_TIMESTAMP() ORDER BY id LIMIT 25 FOR UPDATE SKIP LOCKED`);
+    events = rows || [];
+    for (const event of events) {
+      await conn.execute(`UPDATE email_outbox_events SET status='PROCESSING', attempts=attempts+1, worker_locked_at=UTC_TIMESTAMP() WHERE id=?`, [event.id]);
     }
-  } catch(err) {
-    await conn.rollback().catch(()=>{});
-    if(err.eventId) {
-      const retry=Number(err.attempts)<5;
-      await pool.execute(`UPDATE email_outbox_events SET status=?,available_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL ? SECOND),worker_locked_at=NULL,last_error=? WHERE id=?`,[retry?'PENDING':'FAILED',retry?Math.min(300,2**Number(err.attempts)):0,String(err.message).slice(0,500),err.eventId]);
-    } else logger.error({err:err.message},'Email outbox delivery batch failed');
-  } finally { conn.release(); }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    logger.warn({ err: err.message }, 'Failed to lock email outbox batch');
+    return;
+  } finally {
+    conn.release();
+  }
+
+  for (const event of events) {
+    try {
+      const payload = typeof event.payload_json === 'string' ? JSON.parse(event.payload_json) : (event.payload_json || {});
+      let result;
+      if (event.email_kind === 'PASSWORD_RESET') result = await sendForgotPasswordMail({ to: event.recipient_email, ...payload });
+      else if (event.email_kind === 'VERIFY_EMAIL') result = await sendVerificationMail({ to: event.recipient_email, ...payload });
+      else if (event.email_kind === 'INVITATION') result = await sendInvitationMail({ to: event.recipient_email, ...payload });
+      else result = await sendNotificationMail({ to: event.recipient_email, ...payload });
+
+      if (result?.success) {
+        await pool.execute(`UPDATE email_outbox_events SET status='DELIVERED', delivered_at=UTC_TIMESTAMP(), worker_locked_at=NULL, last_error=NULL WHERE id=?`, [event.id]);
+      } else {
+        const errorMsg = result?.error || 'Email provider rejected delivery';
+        const retry = Number(event.attempts) < 5;
+        const delaySeconds = retry ? Math.min(300, 2 ** Number(event.attempts)) : 0;
+        await pool.execute(
+          `UPDATE email_outbox_events SET status=?, available_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND), worker_locked_at=NULL, last_error=? WHERE id=?`,
+          [retry ? 'PENDING' : 'FAILED', delaySeconds, String(errorMsg).slice(0, 500), event.id]
+        );
+      }
+    } catch (err) {
+      const retry = Number(event.attempts) < 5;
+      const delaySeconds = retry ? Math.min(300, 2 ** Number(event.attempts)) : 0;
+      await pool.execute(
+        `UPDATE email_outbox_events SET status=?, available_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND), worker_locked_at=NULL, last_error=? WHERE id=?`,
+        [retry ? 'PENDING' : 'FAILED', delaySeconds, String(err.message).slice(0, 500), event.id]
+      ).catch(() => {});
+    }
+  }
 }
 const handlers={
   async listNotifications(input) {

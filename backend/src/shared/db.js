@@ -1,20 +1,35 @@
 import mysql from 'mysql2/promise';
 import { config } from '../config/env.js';
 
-export const pool = mysql.createPool({
-  host: config.mysqlHost,
-  port: config.mysqlPort,
-  user: config.mysqlUser,
-  password: config.mysqlPassword,
-  database: config.mysqlDatabase,
-  waitForConnections: true,
-  connectionLimit: config.mysqlConnectionLimit,
-  queueLimit: 0,
-  timezone: 'Z',
-  decimalNumbers: true,
-  namedPlaceholders: true,
-  multipleStatements: false,
-});
+export const pool = mysql.createPool(
+  config.mysqlUrl
+    ? {
+        uri: config.mysqlUrl,
+        ssl: config.mysqlSsl,
+        waitForConnections: true,
+        connectionLimit: config.mysqlConnectionLimit,
+        queueLimit: 0,
+        timezone: 'Z',
+        decimalNumbers: true,
+        namedPlaceholders: true,
+        multipleStatements: false,
+      }
+    : {
+        host: config.mysqlHost,
+        port: config.mysqlPort,
+        user: config.mysqlUser,
+        password: config.mysqlPassword,
+        database: config.mysqlDatabase,
+        ssl: config.mysqlSsl,
+        waitForConnections: true,
+        connectionLimit: config.mysqlConnectionLimit,
+        queueLimit: 0,
+        timezone: 'Z',
+        decimalNumbers: true,
+        namedPlaceholders: true,
+        multipleStatements: false,
+      }
+);
 
 export async function withTransaction(fn) {
   const conn = await pool.getConnection();

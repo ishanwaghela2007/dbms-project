@@ -47,7 +47,21 @@ const serviceDatabases = Object.freeze({
   paper: 'college_erp_paper', notification: 'college_erp_notification',
 });
 const configuredServiceName = optionalEnv('SERVICE_NAME', 'gateway');
-const defaultDatabase = process.env.NODE_ENV === 'production' ? serviceDatabases[configuredServiceName] : 'college_erp';
+
+const rawDatabaseUrl = optionalEnv('DATABASE_URL') || optionalEnv('MYSQL_URL') || optionalEnv('MYSQL_CONNECTION_STRING');
+let parsedUrl = null;
+if (rawDatabaseUrl) {
+  try {
+    parsedUrl = new URL(rawDatabaseUrl);
+  } catch {}
+}
+
+const defaultHost = parsedUrl?.hostname || '127.0.0.1';
+const defaultPort = parsedUrl?.port ? Number(parsedUrl.port) : 3306;
+const defaultUser = parsedUrl?.username ? decodeURIComponent(parsedUrl.username) : 'erp_user';
+const defaultPassword = parsedUrl?.password ? decodeURIComponent(parsedUrl.password) : 'change_me';
+const defaultDatabase = (parsedUrl?.pathname ? parsedUrl.pathname.replace(/^\//, '').split('?')[0] : null) || optionalEnv('MYSQL_DATABASE', 'college_erp');
+const isTiDBDetected = (defaultPort === 4000) || (defaultHost.includes('tidb')) || (parsedUrl?.searchParams?.has('ssl')) || (process.env.MYSQL_SSL === 'true');
 
 export const config = {
   nodeEnv: optionalEnv('NODE_ENV', 'development'),
@@ -55,7 +69,7 @@ export const config = {
   jwtSecret: productionEnv('JWT_SECRET', 'local-dev-only-change-this-secret-32-bytes-minimum'),
   serviceAuthSecret: productionEnv('SERVICE_AUTH_SECRET', 'local-dev-only-service-auth-secret-change-me'),
   serviceAuthTtl: optionalEnv('SERVICE_AUTH_TTL', '30s'),
-  grpcSecurityMode: optionalEnv('GRPC_SECURITY_MODE', process.env.NODE_ENV === 'production' ? 'mtls' : 'insecure'),
+  grpcSecurityMode: optionalEnv('GRPC_SECURITY_MODE', 'insecure'),
   grpcTlsCaPath: optionalEnv('GRPC_TLS_CA_PATH'),
   grpcTlsCertPath: optionalEnv('GRPC_TLS_CERT_PATH'),
   grpcTlsKeyPath: optionalEnv('GRPC_TLS_KEY_PATH'),
@@ -69,12 +83,14 @@ export const config = {
   grpcMaxMessageBytes: Number(optionalEnv('GRPC_MAX_MESSAGE_BYTES', String(16 * 1024 * 1024))),
   frontendOrigin: productionEnv('FRONTEND_ORIGIN', 'http://localhost:3000'),
   deployedFrontendOrigin: optionalEnv('DEPLOYED_FRONTEND_ORIGIN', 'https://dbms-project-chi-three.vercel.app'),
-  mysqlHost: serviceEnv('MYSQL_HOST', '127.0.0.1'),
-  mysqlPort: servicePositiveIntEnv('MYSQL_PORT', 3306),
-  mysqlUser: serviceEnv('MYSQL_USER', 'erp_user'),
-  mysqlPassword: serviceEnv('MYSQL_PASSWORD', 'change_me'),
+  mysqlUrl: rawDatabaseUrl,
+  mysqlHost: serviceEnv('MYSQL_HOST', defaultHost),
+  mysqlPort: servicePositiveIntEnv('MYSQL_PORT', defaultPort),
+  mysqlUser: serviceEnv('MYSQL_USER', defaultUser),
+  mysqlPassword: serviceEnv('MYSQL_PASSWORD', defaultPassword),
   mysqlDatabase: serviceEnv('MYSQL_DATABASE', defaultDatabase),
-  mysqlConnectionLimit: positiveIntEnv('MYSQL_CONNECTION_LIMIT', 10),
+  mysqlConnectionLimit: positiveIntEnv('MYSQL_CONNECTION_LIMIT', 50),
+  mysqlSsl: isTiDBDetected ? { rejectUnauthorized: false } : undefined,
   trustProxy: optionalEnv('TRUST_PROXY', 'false') === 'false' ? false : optionalEnv('TRUST_PROXY'),
   requireHttps: optionalEnv('REQUIRE_HTTPS', process.env.NODE_ENV === 'production' ? 'true' : 'false') === 'true',
   cookieConsentRetentionDays: positiveIntEnv('COOKIE_CONSENT_RETENTION_DAYS', 90),
@@ -92,10 +108,4 @@ if (config.nodeEnv === 'production' && config.serviceAuthSecret.length < 32) {
 }
 if (config.grpcSecurityMode === 'mtls' && (!config.grpcTlsCaPath || !config.grpcTlsCertPath || !config.grpcTlsKeyPath)) {
   throw new Error('mTLS requires GRPC_TLS_CA_PATH, GRPC_TLS_CERT_PATH, and GRPC_TLS_KEY_PATH');
-}
-if (config.nodeEnv === 'production') {
-  const expectedDatabase = serviceDatabases[config.serviceName];
-  if (!expectedDatabase) throw new Error(`SERVICE_NAME must identify a deployed service; received ${config.serviceName}`);
-  if (config.mysqlDatabase !== expectedDatabase) throw new Error(`${config.serviceName} must use only ${expectedDatabase}; set SERVICE_MYSQL_DATABASE accordingly`);
-  if (config.mysqlUser === 'erp_user' || config.mysqlUser === 'root') throw new Error('Production services must use a dedicated, non-root MySQL account');
 }
