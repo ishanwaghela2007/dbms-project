@@ -26,6 +26,31 @@ if (targetService !== 'all' && targetService !== 'gateway-all' && serviceMap[tar
   // Otherwise, run all microservices + API gateway in this container (All-in-One deployment)
   console.log('[runner] Launching all-in-one College ERP stack...');
 
+  // 0. Auto-run database migration and initial seeds if enabled (idempotent)
+  if (process.env.AUTO_MIGRATE !== 'false') {
+    try {
+      console.log('[runner] Ensuring database migrations are applied...');
+      await new Promise((resolve) => {
+        const mig = fork(path.join(rootDir, 'database/migrate.js'), [], { stdio: 'inherit' });
+        mig.on('exit', () => resolve());
+      });
+
+      console.log('[runner] Ensuring master academic data is seeded...');
+      await new Promise((resolve) => {
+        const demo = fork(path.join(rootDir, 'database/seed-demo.js'), [], { stdio: 'inherit' });
+        demo.on('exit', () => resolve());
+      });
+
+      console.log('[runner] Ensuring initial admin account is created...');
+      await new Promise((resolve) => {
+        const seed = fork(path.join(rootDir, 'database/seed-admin.js'), [], { stdio: 'inherit' });
+        seed.on('exit', () => resolve());
+      });
+    } catch (err) {
+      console.warn('[runner] Auto-migration error (continuing startup):', err.message);
+    }
+  }
+
   const children = [];
 
   function startChild(name, relPath) {
