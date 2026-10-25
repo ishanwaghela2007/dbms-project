@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, BellRing, BookOpen, CalendarClock, CheckCircle2, Clock3, FileCheck2, GraduationCap, TrendingUp } from "lucide-react";
 import { Card, PageHeading, StatCard, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
+import { getGreeting, getGreetingDescription } from "@/lib/utils/greeting";
 import type { Meeting, StudentDashboardSummary, StudentNotification } from "@/types/erp";
 
 export default function StudentDashboard() {
@@ -12,7 +13,12 @@ export default function StudentDashboard() {
   const [notifications, setNotifications] = useState<StudentNotification[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loadError, setLoadError] = useState("");
+  const [studentName, setStudentName] = useState("");
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("college_erp_user");
+      if (stored) { const u = JSON.parse(stored); if (u.fullName || u.name) setStudentName((u.fullName || u.name).split(" ")[0]); }
+    } catch {}
     let active = true;
     Promise.all([erpApi.getStudentDashboard(), erpApi.listStudentNotifications(), erpApi.listStudentMeetings()]).then(([dashboard, loadedNotifications, loadedMeetings]) => {
       if (!active) return;
@@ -28,7 +34,7 @@ export default function StudentDashboard() {
   const recentResults = (summary?.recentResults ?? []).filter(result => result.status === "Published" && result.obtained !== null).slice(0, 3);
   return <>
     {loadError && <div className="notice notice-danger" style={{ marginBottom: 14 }}><BellRing size={16}/><div><strong>Dashboard data unavailable</strong>{loadError}</div></div>}
-    <PageHeading eyebrow="STUDENT PORTAL · OCTOBER 2026" title="Your academic overview" description="Your academic progress, attendance and upcoming actions in one place." actions={<Link className="btn btn-primary btn-md" href="/student/notifications"><BellRing size={15}/> View notifications {alerts.length > 0 && <span className="nav-badge">{alerts.length}</span>}</Link>} />
+    <PageHeading eyebrow="STUDENT PORTAL" title={studentName ? `${getGreeting()}, ${studentName} 👋` : getGreeting()} description={getGreetingDescription("student")} actions={<Link className="btn btn-primary btn-md" href="/student/notifications"><BellRing size={15}/> View notifications {alerts.length > 0 && <span className="nav-badge">{alerts.length}</span>}</Link>} />
     <div className="stat-grid">
       <StatCard label="Current attendance" value={summary ? `${summary.currentAttendance}%` : "—"} hint="Across current subjects" icon={TrendingUp} color="blue" />
       <StatCard label="Average assessment score" value={summary ? `${summary.averageScore}%` : "—"} hint="Published results only" icon={FileCheck2} color="green" />

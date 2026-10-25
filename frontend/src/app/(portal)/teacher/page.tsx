@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, BellRing, CheckCircle2, ClipboardCheck, Clock3, FileCheck2, Users, UsersRound } from "lucide-react";
 import { Card, PageHeading, StatCard, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
+import { getGreeting, getGreetingDescription } from "@/lib/utils/greeting";
 import type { Followup, TeacherClassAssignment, TeacherDashboardSummary } from "@/types/erp";
 
 export default function TeacherDashboard() {
@@ -12,8 +13,13 @@ export default function TeacherDashboard() {
   const [followupRows, setFollowupRows] = useState<Followup[]>([]);
   const [assignedClasses, setAssignedClasses] = useState<TeacherClassAssignment[]>([]);
   const [loadError, setLoadError] = useState("");
+  const [teacherName, setTeacherName] = useState("");
 
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("college_erp_user");
+      if (stored) { const u = JSON.parse(stored); if (u.fullName || u.name) setTeacherName((u.fullName || u.name).split(" ")[0]); }
+    } catch {}
     let active = true;
     Promise.all([
       erpApi.getTeacherDashboard().catch(() => null),
@@ -30,7 +36,7 @@ export default function TeacherDashboard() {
 
   return <>
     {loadError && <div className="notice notice-danger" style={{ marginBottom: 14 }}><BellRing size={16}/><div><strong>Dashboard data unavailable</strong>{loadError}</div></div>}
-    <PageHeading eyebrow="FACULTY WORKSPACE" title="Your teaching space" description="Everything you need for classes, student progress and follow-ups in one place." actions={<Link className="btn btn-primary btn-md" href="/teacher/attendance"><ClipboardCheck size={15}/> Take attendance</Link>} />
+    <PageHeading eyebrow="FACULTY WORKSPACE" title={teacherName ? `${getGreeting()}, ${teacherName} 👋` : getGreeting()} description={getGreetingDescription("teacher")} actions={<Link className="btn btn-primary btn-md" href="/teacher/attendance"><ClipboardCheck size={15}/> Take attendance</Link>} />
     <div className="stat-grid">
       <StatCard label="Assigned subjects" value={summary ? String(summary.assignedSubjects) : (assignedClasses.length > 0 ? String(assignedClasses.length) : "—")} hint="Teaching allocations" icon={FileCheck2} color="blue" />
       <StatCard label="Students across classes" value={summary ? String(summary.studentsAcrossClasses) : "—"} hint="Active enrolments" icon={Users} color="green" />

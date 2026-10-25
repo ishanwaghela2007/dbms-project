@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CircleAlert, FileCheck2, GraduationCap, Plus, UserPlus, Users, UsersRound } from "lucide-react";
 import { Card, PageHeading, StatCard, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
+import { getGreeting, getGreetingDescription } from "@/lib/utils/greeting";
 import type { AdminDashboardSummary, Student } from "@/types/erp";
 
 const distributionColors = ["#647fe7", "#9c8ce5", "#51b79a", "#f0bd61"];
@@ -75,7 +76,7 @@ export default function AdminDashboard() {
 
   return <>
     {loadError && <div className="notice notice-danger" style={{ marginBottom: 14 }}><CircleAlert size={16}/><div><strong>Dashboard data unavailable</strong>{loadError}</div></div>}
-    <PageHeading eyebrow="CAMPUS ADMINISTRATION" title={`Good morning, ${adminName} 👋`} description="Here's what's happening across your campus today." actions={<><Link className="btn btn-secondary btn-md" href="/admin/register"><UserPlus size={15}/> Register account</Link><Link className="btn btn-primary btn-md" href="/admin/students"><Plus size={16}/> Create student</Link></>} />
+    <PageHeading eyebrow="CAMPUS ADMINISTRATION" title={`${getGreeting()}, ${adminName} 👋`} description={getGreetingDescription("admin")} actions={<><Link className="btn btn-secondary btn-md" href="/admin/register"><UserPlus size={15}/> Register account</Link><Link className="btn btn-primary btn-md" href="/admin/students"><Plus size={16}/> Create student</Link></>} />
     <div className="stat-grid">
       <StatCard label="Total students" value={summary ? summary.totalStudents.toLocaleString() : (studentRows.length > 0 ? studentRows.length.toLocaleString() : "—")} hint="Enrolled students" trend={summary?.studentGrowthPercent ? `+${summary.studentGrowthPercent}%` : undefined} icon={Users} color="blue" />
       <StatCard label="Faculty members" value={summary ? summary.facultyMembers.toLocaleString() : "—"} hint="Active faculty" trend={summary?.facultyGrowthPercent ? `+${summary.facultyGrowthPercent}%` : undefined} icon={GraduationCap} color="green" />
