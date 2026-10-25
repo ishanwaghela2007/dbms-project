@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { erpApi } from "@/lib/api/erp";
+import { apiRequest } from "@/lib/api/client";
 import { fuzzySearch } from "@/lib/search/fuzzy";
 import { getAvatarUrl } from "@/lib/utils/avatar";
 import {
@@ -104,6 +105,9 @@ export default function PortalShell({ children }: { children: ReactNode }) {
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "forbidden" | "unauthorized">("checking");
   const [forbiddenMessage, setForbiddenMessage] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
+  type PopoverNotif = { id: string; title: string; message: string; kind: string; isRead: boolean; createdAt?: string };
+  const [popoverNotifs, setPopoverNotifs] = useState<PopoverNotif[]>([]);
+  const [popoverLoading, setPopoverLoading] = useState(false);
 
   useEffect(() => {
     try {
@@ -490,8 +494,92 @@ export default function PortalShell({ children }: { children: ReactNode }) {
               )}
             </div>
             <div className="notification-wrap">
-              <button className={`icon-button notification-button ${notificationsOpen ? "button-selected" : ""}`} aria-label="Notifications" onClick={() => setNotificationsOpen(v => !v)}><Bell size={19} /><i /></button>
-              {notificationsOpen && <div className="notification-popover"><div className="popover-head"><strong>Notifications</strong><span className="status status-warning">3 new</span></div><div className="popover-item"><span className="notification-dot dot-amber" /><div><strong>Low attendance review</strong><p>3 students are below the configured threshold.</p><small>12 min ago</small></div></div><div className="popover-item"><span className="notification-dot dot-blue" /><div><strong>Marks pending review</strong><p>One PDF validation needs your confirmation.</p><small>1 hour ago</small></div></div><Link className="popover-footer" href={role === "student" ? "/student/notifications" : role === "admin" ? "/admin/attendance-alerts" : "/teacher/followups"} onClick={() => setNotificationsOpen(false)}>View all notifications <ChevronRight size={14} /></Link></div>}
+              <button
+                className={`icon-button notification-button ${notificationsOpen ? "button-selected" : ""}`}
+                aria-label="Notifications"
+                onClick={() => {
+                  setNotificationsOpen(v => {
+                    const opening = !v;
+                    if (opening) {
+                      setPopoverLoading(true);
+                      const endpoint = role === "student" ? "/student/notifications?limit=5" : role === "teacher" ? "/teacher/dashboard" : "/admin/dashboard";
+                      if (role === "student") {
+                        apiRequest<PopoverNotif[]>("/student/notifications?limit=5").then(items => {
+                          setPopoverNotifs((items || []).slice(0, 5));
+                        }).catch(() => {}).finally(() => setPopoverLoading(false));
+                      } else {
+                        // For admin/teacher: pull low-attendance followups as alerts
+                        apiRequest<{ lowAttendanceFlags?: number; attendanceAlerts?: number; assignedSubjects?: number; marksToFinalize?: number }>(endpoint).then(data => {
+                          const items: PopoverNotif[] = [];
+                          if (data) {
+                            const alerts = (data as Record<string, number>).attendanceAlerts ?? (data as Record<string, number>).lowAttendanceFlags ?? 0;
+                            const marks = (data as Record<string, number>).marksToFinalize ?? 0;
+                            if (alerts > 0) items.push({ id: "alert-attendance", title: "Low attendance follow-ups", message: `${alerts} student${alerts !== 1 ? "s" : ""} need${alerts === 1 ? "s" : ""} a follow-up.`, kind: "attendance", isRead: false });
+                            if (marks > 0) items.push({ id: "alert-marks", title: "Marks pending review", message: `${marks} assessment${marks !== 1 ? "s" : ""} need${marks === 1 ? "s" : ""} your confirmation.`, kind: "marks", isRead: false });
+                          }
+                          setPopoverNotifs(items);
+                        }).catch(() => setPopoverNotifs([])).finally(() => setPopoverLoading(false));
+                      }
+                    }
+                    return opening;
+                  });
+                }}
+              >
+                <Bell size={19} />
+                {popoverNotifs.filter(n => !n.isRead).length > 0 && <i />}
+              </button>
+              {notificationsOpen && (
+                <div className="notification-popover">
+                  <div className="popover-head">
+                    <strong>Notifications</strong>
+                    {popoverLoading
+                      ? <span className="status status-neutral">Loading…</span>
+                      : popoverNotifs.filter(n => !n.isRead).length > 0
+                        ? <span className="status status-warning">{popoverNotifs.filter(n => !n.isRead).length} new</span>
+                        : <span className="status status-neutral">Up to date</span>
+                    }
+                  </div>
+                  {popoverLoading && <div className="popover-item" style={{ color: "#9198b0", fontSize: 13 }}>Fetching notifications…</div>}
+                  {!popoverLoading && popoverNotifs.length === 0 && (
+                    <div className="popover-item" style={{ color: "#9198b0", fontSize: 13 }}>No new notifications.</div>
+                  )}
+                  {!popoverLoading && popoverNotifs.map(n => (
+                    <div
+                      key={n.id}
+                      className="popover-item"
+                      style={{ cursor: n.id.startsWith("alert-") ? "default" : "pointer" }}
+                      onClick={() => {
+                        if (!n.id.startsWith("alert-") && !n.isRead) {
+                          erpApi.markNotificationRead(n.id).catch(() => {});
+                          setPopoverNotifs(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x));
+                        }
+                      }}
+                    >
+                      <span className={`notification-dot ${n.kind === "attendance" ? "dot-amber" : n.kind === "meeting" ? "dot-blue" : n.kind === "marks" ? "dot-violet" : "dot-blue"}`} />
+                      <div>
+                        <strong>{n.title}</strong>
+                        <p>{n.message}</p>
+                        {n.createdAt && (
+                          <small>{(() => {
+                            const diff = Date.now() - new Date(n.createdAt).getTime();
+                            if (diff < 60000) return "Just now";
+                            if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
+                            if (diff < 86400000) return `${Math.floor(diff / 3600000)} hr ago`;
+                            return new Date(n.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+                          })()}</small>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <Link
+                    className="popover-footer"
+                    href={role === "student" ? "/student/notifications" : role === "admin" ? "/admin/attendance-alerts" : "/teacher/followups"}
+                    onClick={() => setNotificationsOpen(false)}
+                  >
+                    View all notifications <ChevronRight size={14} />
+                  </Link>
+                </div>
+              )}
             </div>
             <div className="topbar-divider" />
             <button className="topbar-user" onClick={() => router.push(role === "student" ? "/student/settings" : role === "teacher" ? "/teacher/settings" : "/settings")}>
