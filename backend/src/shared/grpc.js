@@ -81,9 +81,9 @@ export function rpc(client, method, payload = {}) {
 
 export function sendError(callback, error) {
   const code = error.grpcCode ?? (error.code === 'ER_DUP_ENTRY' ? grpc.status.ALREADY_EXISTS : error.code === 'ER_NO_REFERENCED_ROW_2' ? grpc.status.FAILED_PRECONDITION : grpc.status.INTERNAL);
-  const message = error.publicMessage || (code === grpc.status.INTERNAL ? 'Internal service error' : error.message);
+  const message = error.publicMessage || error.message || (code === grpc.status.INTERNAL ? 'Internal service error' : error.message);
   if (code === grpc.status.INTERNAL) logger.error({ err: error.message, stack: error.stack }, 'gRPC handler failed');
-  callback({ code, message, details: message });
+  callback({ code, message, details: error.message || message });
 }
 
 export function jsonHandler(handler, serviceName) {

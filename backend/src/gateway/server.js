@@ -422,7 +422,7 @@ app.use((err,req,res,_next)=>{
   const status=Number(err.status)||(err.code==='ER_DUP_ENTRY'?409:err.code==='ER_NO_REFERENCED_ROW_2'?400:statusForGrpc(err.code))||500;
   const message=status>=500?(status===503?err.message:'Internal server error'):(err.publicMessage||err.message||'Request failed');
   if(status>=500) logger.error({requestId:req.requestId,err:err.message,stack:err.stack,grpcCode:err.code},'Gateway request failed');
-  res.status(status).json({error:message,code:err.codeName||'REQUEST_FAILED',requestId:req.requestId});
+  res.status(status).json({error:message,code:err.codeName||'REQUEST_FAILED',requestId:req.requestId,details:err.details||err.message});
 });
 
 const defaultPort = process.env.RENDER || config.nodeEnv === 'production' ? 10000 : 4000;

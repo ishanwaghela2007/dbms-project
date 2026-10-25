@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import cloudinary from 'cloudinary';
+import { logger } from '../shared/logger.js';
 
 export function cloudinaryConfigured() {
   return Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
@@ -20,19 +21,23 @@ export function configureCloudinary() {
 
 export async function uploadPublicBuffer(file, folder = 'uploads', resourceType = 'image') {
   if (cloudinaryConfigured()) {
-    const cl = configureCloudinary();
-    return new Promise((resolve, reject) => {
-      const stream = cl.uploader.upload_stream({
-        folder,
-        resource_type: resourceType,
-        type: 'upload',
-        use_filename: false,
-        unique_filename: true,
-        overwrite: false,
-        timeout: 120000,
-      }, (error, result) => error ? reject(error) : resolve(result));
-      stream.end(file.buffer);
-    });
+    try {
+      const cl = configureCloudinary();
+      return await new Promise((resolve, reject) => {
+        const stream = cl.uploader.upload_stream({
+          folder,
+          resource_type: resourceType,
+          type: 'upload',
+          use_filename: false,
+          unique_filename: true,
+          overwrite: false,
+          timeout: 120000,
+        }, (error, result) => error ? reject(error) : resolve(result));
+        stream.end(file.buffer);
+      });
+    } catch (cloudErr) {
+      logger.warn({ err: cloudErr.message }, 'Cloudinary public upload failed, falling back to local file storage');
+    }
   }
 
   // Graceful local file storage fallback
@@ -56,19 +61,23 @@ export async function uploadPublicBuffer(file, folder = 'uploads', resourceType 
 
 export async function uploadAuthenticatedBuffer(file, folder = 'uploads', resourceType = 'image') {
   if (cloudinaryConfigured()) {
-    const cl = configureCloudinary();
-    return new Promise((resolve, reject) => {
-      const stream = cl.uploader.upload_stream({
-        folder,
-        resource_type: resourceType,
-        type: 'authenticated',
-        use_filename: false,
-        unique_filename: true,
-        overwrite: false,
-        timeout: 120000,
-      }, (error, result) => error ? reject(error) : resolve(result));
-      stream.end(file.buffer);
-    });
+    try {
+      const cl = configureCloudinary();
+      return await new Promise((resolve, reject) => {
+        const stream = cl.uploader.upload_stream({
+          folder,
+          resource_type: resourceType,
+          type: 'authenticated',
+          use_filename: false,
+          unique_filename: true,
+          overwrite: false,
+          timeout: 120000,
+        }, (error, result) => error ? reject(error) : resolve(result));
+        stream.end(file.buffer);
+      });
+    } catch (cloudErr) {
+      logger.warn({ err: cloudErr.message }, 'Cloudinary authenticated upload failed, falling back to local storage');
+    }
   }
 
   // Graceful local file storage fallback
