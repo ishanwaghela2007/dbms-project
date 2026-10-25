@@ -55,11 +55,13 @@ const handlers={
     }
     if (p.cloudinary_public_id?.startsWith('local:')) {
       const rel = p.cloudinary_public_id.replace(/^local:/, '');
-      const url = `http://localhost:4000/api/v1/uploads/${rel}`;
+      const base = (process.env.PUBLIC_URL || process.env.BACKEND_URL || 'https://college-erp-backend-gr0k.onrender.com').replace(/\/$/, '');
+      const url = `${base}/api/v1/uploads/${rel}`;
       return { id: p.id, url, expiresInSeconds: 3600, mimeType: p.mime_type, title: p.title };
     }
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_SECRET) {
-      const url = `http://localhost:4000/api/v1/uploads/${p.cloudinary_public_id}`;
+      const base = (process.env.PUBLIC_URL || process.env.BACKEND_URL || 'https://college-erp-backend-gr0k.onrender.com').replace(/\/$/, '');
+      const url = `${base}/api/v1/uploads/${p.cloudinary_public_id}`;
       return { id: p.id, url, expiresInSeconds: 3600, mimeType: p.mime_type, title: p.title };
     }
     const url=cloudinary.v2.url(p.cloudinary_public_id,{resource_type:p.resource_type||'image',type:p.delivery_type||'authenticated',sign_url:true,secure:true,format:'pdf'});

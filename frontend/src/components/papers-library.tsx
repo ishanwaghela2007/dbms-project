@@ -43,7 +43,7 @@ export default function PapersLibrary({ scope }: { scope: "admin" | "teacher" | 
   async function openPaper(paper: Paper) {
     setMessage("");
     try {
-      const result = await fetch(`${(process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000/api/v1").replace(/\/$/, "")}/papers/${encodeURIComponent(paper.id)}/access`, { credentials: "include", headers: { Authorization: `Bearer ${window.localStorage.getItem("college_erp_access_token") ?? ""}` } });
+      const result = await fetch(`${(process.env.NEXT_PUBLIC_API_BASE_URL || "https://college-erp-backend-gr0k.onrender.com/api/v1").replace(/\/$/, "")}/papers/${encodeURIComponent(paper.id)}/access`, { credentials: "include", headers: { Authorization: `Bearer ${window.localStorage.getItem("college_erp_access_token") ?? ""}` } });
       if (!result.ok) throw new Error("You do not have permission to access this paper.");
       const body = await result.json() as { url?: string };
       if (!body.url) throw new Error("The file service did not return a delivery URL.");
