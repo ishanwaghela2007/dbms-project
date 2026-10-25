@@ -144,13 +144,22 @@ export default function AcademicsPage() {
           <form onSubmit={submit} className="stack" style={{ gap: 15 }}>
             <div className="field">
               <label>Teacher *</label>
-              <select required value={teacher} onChange={e => setTeacher(e.target.value)}>
-                {teachersList.map(t => (
-                  <option key={t.id} value={t.name}>
-                    {t.name} · {t.department}
-                  </option>
-                ))}
-              </select>
+              {teachersList.length > 0 ? (
+                <select required value={teacher} onChange={e => setTeacher(e.target.value)}>
+                  {teachersList.map(t => (
+                    <option key={t.id} value={t.name}>
+                      {t.name} · {t.department}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  required
+                  value={teacher}
+                  onChange={e => setTeacher(e.target.value)}
+                  placeholder="Enter teacher name (e.g. Prof. Faculty Name)"
+                />
+              )}
             </div>
             <div className="field">
               <label>Subject *</label>

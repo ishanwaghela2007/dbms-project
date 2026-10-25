@@ -20,7 +20,7 @@ export default function TeacherMeetingsPage() {
     setBusy(meeting.id); setNotice("");
     try {
       const responseMessage = responses[meeting.id] || (action === "ACCEPT" ? "Your meeting is confirmed." : action === "DECLINE" ? "Please choose another available slot." : "Please choose the alternate time offered to you.");
-      const result = await erpApi.respondToMeeting(meeting.id, { action, responseMessage, alternateSlotId: action === "PROPOSE_ALTERNATIVE" ? "slot-neha-20261014-1500" : undefined });
+      const result = await erpApi.respondToMeeting(meeting.id, { action, responseMessage, alternateSlotId: action === "PROPOSE_ALTERNATIVE" ? `slot-alt-${Date.now()}` : undefined });
       const status: Meeting["status"] = action === "ACCEPT" ? "CONFIRMED" : action === "DECLINE" ? "DECLINED" : "RESCHEDULE_PROPOSED";
       setMeetings(current => current.map(item => item.id === meeting.id ? { ...item, status, message: responseMessage } : item));
       setNotice(result.message || `Meeting ${status.toLowerCase().replaceAll("_", " ")}.`);
