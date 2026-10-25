@@ -1,5 +1,5 @@
 const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL;
-const API_BASE = (configuredApiBase || (process.env.NODE_ENV === "production" ? "" : "http://localhost:4000/api/v1")).replace(/\/$/, "");
+const API_BASE = (configuredApiBase || "https://college-erp-backend-gr0k.onrender.com/api/v1").replace(/\/$/, "");
 
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
