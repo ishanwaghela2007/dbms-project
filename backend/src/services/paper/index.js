@@ -78,7 +78,7 @@ const handlers={
     if(!input.cloudinaryPublicId) throw badRequest('cloudinaryPublicId required');
     const [target]=await pool.execute('SELECT account_type FROM users WHERE id=?',[input.userId]);if(!target[0])throw notFound('User not found');
     const mediaId=randomUUID(); await pool.execute(`INSERT INTO media_assets (id,owner_user_id,category,cloudinary_public_id,resource_type,delivery_type,original_filename,mime_type,bytes_size) VALUES (?,?, 'PROFILE_IMAGE',?,'image','upload',?,'image/jpeg',?)`,[mediaId,input.userId,input.cloudinaryPublicId,input.originalFilename||'avatar.jpg',Number(input.bytesSize)||0]);
-    await pool.execute('UPDATE users SET avatar_public_id=? WHERE id=?', [input.cloudinaryPublicId, input.userId]);
+    await pool.execute('UPDATE users SET avatar_public_id=? WHERE id=?', [input.cloudinaryPublicId, input.userId]).catch(() => {});
     if (target[0].account_type === 'STUDENT') {
       await pool.execute('UPDATE student_profiles SET avatar_public_id=? WHERE user_id=?', [input.cloudinaryPublicId, input.userId]).catch(() => {});
     } else if (target[0].account_type === 'TEACHER') {

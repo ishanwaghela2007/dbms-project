@@ -16,7 +16,7 @@ COPY . .
 # Build arguments for public client variables (can be overridden at build time)
 ARG NEXT_PUBLIC_API_BASE_URL=https://college-erp-backend-gr0k.onrender.com/api/v1
 ARG NEXT_PUBLIC_DEMO_MODE=false
-ARG NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=pdf
+ARG NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=ka5vsref
 
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_DEMO_MODE=$NEXT_PUBLIC_DEMO_MODE
