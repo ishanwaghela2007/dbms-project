@@ -144,7 +144,12 @@ const handlers = {
     return updated[0];
   },
   async getMyProfile({ actorUserId }) {
-    const [uRows] = await pool.execute('SELECT id,email,full_name,account_type,is_admin,is_active,avatar_public_id,created_at FROM users WHERE id=? AND is_active=1 LIMIT 1', [actorUserId]);
+    let uRows;
+    try {
+      [uRows] = await pool.execute('SELECT id,email,full_name,account_type,is_admin,is_active,avatar_public_id,created_at FROM users WHERE id=? AND is_active=1 LIMIT 1', [actorUserId]);
+    } catch {
+      [uRows] = await pool.execute('SELECT id,email,full_name,account_type,is_admin,is_active,created_at FROM users WHERE id=? AND is_active=1 LIMIT 1', [actorUserId]);
+    }
     const u = uRows[0];
     if (!u) throw notFound('User not found');
     if (u.account_type === 'STUDENT') {

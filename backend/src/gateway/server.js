@@ -27,7 +27,18 @@ const allowedFrontendOrigins = [...new Set([
   ...config.frontendOrigin.split(',').map((origin) => origin.trim()).filter(Boolean),
   config.deployedFrontendOrigin.trim(),
 ])];
-app.use(cors({ origin: allowedFrontendOrigins, credentials: true, methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Idempotency-Key'] }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedFrontendOrigins.includes(origin) || origin.endsWith('.onrender.com') || origin.includes('localhost')) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS policy does not allow access from ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET','POST','PATCH','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','Idempotency-Key']
+}));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use('/api/v1/uploads', express.static(path.join(process.cwd(), 'uploads')));

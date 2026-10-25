@@ -54,6 +54,14 @@ try {
     await connection.query('ALTER TABLE users ADD COLUMN auth_version INT UNSIGNED NOT NULL DEFAULT 1');
   }
 
+  const [avatarCol] = await connection.query(
+    `SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='users' AND COLUMN_NAME='avatar_public_id'`,
+    [targetDb]
+  );
+  if (!avatarCol.length) {
+    await connection.query('ALTER TABLE users ADD COLUMN avatar_public_id VARCHAR(255) NULL');
+  }
+
   // Check database engine version for TiDB Cloud compatibility
   const [versionRows] = await connection.query('SELECT VERSION() AS ver');
   const serverVersion = String(versionRows[0]?.ver || '');
