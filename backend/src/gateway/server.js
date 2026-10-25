@@ -33,7 +33,7 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use('/api/v1/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use((req,res,next)=>{ req.requestId=randomUUID(); res.setHeader('X-Request-Id',req.requestId); next(); });
 app.use((req,res,next)=>{
-  if (req.path === '/' || req.path === '/health' || req.path === '/healthz' || req.path === '/ready') return next();
+  if (req.path === '/' || req.path === '/health' || req.path === '/helth' || req.path === '/healthz' || req.path === '/ready') return next();
   if (!config.requireHttps || req.secure) return next();
   const host=req.get('host');
   if (!host) return res.status(400).json({error:'Host header required'});
@@ -42,6 +42,9 @@ app.use((req,res,next)=>{
 
 app.get('/', (_req, res) => res.json({ status: 'ok', service: 'college-erp-api-gateway' }));
 app.get('/healthz', (_req, res) => res.status(200).send('OK'));
+app.get('/helth', wrap(async(_req,res)=>{
+  const db=await pingDb(); res.json({status:db?'ok':'degraded',service:'college-erp-api-gateway',database:db?'ok':'down',redis:isRedisReady()?'ok':'fallback-to-auth-service',timestamp:new Date().toISOString()});
+}));
 
 function wrap(fn) { return (req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next); }
 function payload(req, extras={}) { return { ...(req.body||{}), ...extras, actorUserId:req.auth?.userId }; }
@@ -411,7 +414,8 @@ app.use((err,req,res,_next)=>{
   res.status(status).json({error:message,code:err.codeName||'REQUEST_FAILED',requestId:req.requestId});
 });
 
-const port=Number(process.env.PORT||4000);
+const defaultPort = process.env.RENDER || config.nodeEnv === 'production' ? 10000 : 4000;
+const port = Number(process.env.PORT || defaultPort);
 connectRedis();
 const server=app.listen(port,'0.0.0.0',()=>logger.info({port,environment:config.nodeEnv},'Express API Gateway started'));
 function shutdown(){server.close(()=>process.exit(0));}
