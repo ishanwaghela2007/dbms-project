@@ -35,3 +35,5 @@ uploads/
 dist/
 build/
 .agents/
+skills-lock.json
+skill.lock
