@@ -76,7 +76,8 @@ export async function uploadAuthenticatedBuffer(file, folder = 'uploads', resour
         stream.end(file.buffer);
       });
     } catch (cloudErr) {
-      logger.warn({ err: cloudErr.message }, 'Cloudinary authenticated upload failed, falling back to local storage');
+      logger.warn({ err: cloudErr.message }, 'Cloudinary authenticated upload failed, aborting storage');
+      throw cloudErr;
     }
   }
 

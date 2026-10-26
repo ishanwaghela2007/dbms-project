@@ -68,6 +68,7 @@ const handlers = {
     if (inviteToken) {
       await pool.execute('INSERT INTO user_invitations (id,user_id,token_hash,expires_at) VALUES (?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 24 HOUR))', [randomUUID(), id, createHash('sha256').update(inviteToken).digest('hex')]);
       const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+      const inviteUrl = `${front}/accept-invitation?token=${inviteToken}`;
       await enqueueEmail({ eventKey: `invitation:${id}:${inviteToken}`, to: normalizedEmail, kind: 'INVITATION', payload: { fullName: String(fullName).trim(), inviteUrl, role: accountType } });
       sendInvitationMail({ to: normalizedEmail, fullName: String(fullName).trim(), inviteUrl, role: accountType }).catch(err => logger.warn({ err: err.message }, 'Direct invitation mail failed'));
       return { id, email: normalizedEmail, fullName: String(fullName).trim(), accountType, is_admin: accountType === 'ADMIN' && Boolean(isAdmin), is_active: true, mustSetPassword: true, ...(process.env.NODE_ENV === 'production' ? {} : { inviteToken, inviteUrl }) };
@@ -143,6 +144,7 @@ const handlers = {
         [resetId, user.id, tokenHash]
       );
       const front = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+      const resetUrl = `${front}/reset-password?token=${resetToken}`;
       await enqueueEmail({ eventKey: `password-reset:${resetId}`, to: user.email, kind: 'PASSWORD_RESET', payload: { fullName: user.full_name, resetUrl } });
       sendForgotPasswordMail({ to: user.email, fullName: user.full_name, resetUrl }).catch(err => logger.warn({ err: err.message }, 'Direct password reset mail failed'));
       logger.info({ email: user.email }, 'Password reset email queued');

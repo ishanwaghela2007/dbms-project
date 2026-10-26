@@ -22,7 +22,6 @@ services:
       - erp_mysql:/var/lib/mysql
       - ./database/init/000-service-databases.sql:/docker-entrypoint-initdb.d/000-service-databases.sql:ro
       - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
-      - ./database/triggers.sql:/docker-entrypoint-initdb.d/002-triggers.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot_dev_change_me"]
       interval: 10s

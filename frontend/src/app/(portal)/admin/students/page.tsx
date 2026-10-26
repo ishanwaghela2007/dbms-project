@@ -47,9 +47,14 @@ export default function StudentsPage() {
 
   const filtered = useMemo(() => rows.filter(s => {
     const matchesQuery = `${s.name} ${s.rollNo} ${s.email}`.toLowerCase().includes(query.toLowerCase());
-    const matchesBranch = selectedBranch === "All branches" || 
-      (s.department && s.department.toLowerCase().includes(selectedBranch.toLowerCase())) ||
-      (s.program && s.program.toLowerCase().includes(selectedBranch.toLowerCase()));
+    const branchConf = branches.find(b => b.id === selectedBranch);
+    const matchesBranch = selectedBranch === "All branches" || (branchConf != null && (
+      Boolean(s.program && s.program.toLowerCase().includes(branchConf.name.toLowerCase())) ||
+      Boolean(s.program && s.program.toLowerCase() === branchConf.program.toLowerCase()) ||
+      Boolean(s.department && s.department.toLowerCase() === branchConf.department.toLowerCase()) ||
+      Boolean(s.department && s.department.toLowerCase().includes(branchConf.name.toLowerCase())) ||
+      Boolean(s.department && s.department.toLowerCase().includes(branchConf.short.toLowerCase()))
+    ));
     
     let matchesYear = true;
     if (selectedYear !== "All years") {
@@ -158,7 +163,7 @@ export default function StudentsPage() {
           >
             <option>All branches</option>
             {branches.map(b => (
-              <option key={b.id} value={b.short}>{b.short} · {b.name}</option>
+              <option key={b.id} value={b.id}>{b.short} · {b.name}</option>
             ))}
           </select>
         </label>

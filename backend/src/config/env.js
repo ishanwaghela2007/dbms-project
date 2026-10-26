@@ -16,38 +16,6 @@ export function intEnv(name, fallback) {
   return value;
 }
 
-function productionEnv(name, fallback) {
-  if (process.env.NODE_ENV === 'production' && !process.env[name]) {
-    throw new Error(`Missing required production environment variable: ${name}`);
-  }
-  return optionalEnv(name, fallback);
-}
-
-function positiveIntEnv(name, fallback) {
-  const value = Number(productionEnv(name, String(fallback)));
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
-  return value;
-}
-
-function serviceEnv(name, fallback) {
-  const serviceValue = process.env[`SERVICE_${name}`];
-  if (serviceValue) return serviceValue;
-  return productionEnv(name, fallback);
-}
-
-function servicePositiveIntEnv(name, fallback) {
-  const value = Number(serviceEnv(name, String(fallback)));
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`SERVICE_${name} or ${name} must be a positive integer`);
-  return value;
-}
-
-const serviceDatabases = Object.freeze({
-  gateway: 'college_erp_gateway', auth: 'college_erp_auth', profile: 'college_erp_profile',
-  academic: 'college_erp_academic', attendance: 'college_erp_attendance', marks: 'college_erp_marks',
-  paper: 'college_erp_paper', notification: 'college_erp_notification',
-});
-const configuredServiceName = optionalEnv('SERVICE_NAME', 'gateway');
-
 const rawDatabaseUrl = optionalEnv('DATABASE_URL') || optionalEnv('MYSQL_URL') || optionalEnv('MYSQL_CONNECTION_STRING');
 let parsedUrl = null;
 if (rawDatabaseUrl) {
@@ -62,6 +30,41 @@ const defaultUser = parsedUrl?.username ? decodeURIComponent(parsedUrl.username)
 const defaultPassword = parsedUrl?.password ? decodeURIComponent(parsedUrl.password) : 'change_me';
 const defaultDatabase = (parsedUrl?.pathname ? parsedUrl.pathname.replace(/^\//, '').split('?')[0] : null) || optionalEnv('MYSQL_DATABASE', 'college_erp');
 const isTiDBDetected = (defaultPort === 4000) || (defaultHost.includes('tidb')) || (parsedUrl?.searchParams?.has('ssl')) || (process.env.MYSQL_SSL === 'true');
+
+function productionEnv(name, fallback = undefined) {
+  if (process.env.NODE_ENV === 'production' && !process.env[name]) {
+    if (fallback === undefined) {
+      throw new Error(`Missing required production environment variable: ${name}`);
+    }
+  }
+  return optionalEnv(name, fallback);
+}
+
+function positiveIntEnv(name, fallback) {
+  const value = Number(optionalEnv(name, String(fallback)));
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  return value;
+}
+
+function serviceEnv(name, fallback) {
+  const serviceValue = process.env[`SERVICE_${name}`];
+  if (serviceValue) return serviceValue;
+  if (rawDatabaseUrl) return optionalEnv(name, fallback);
+  return fallback !== undefined ? optionalEnv(name, fallback) : productionEnv(name, fallback);
+}
+
+function servicePositiveIntEnv(name, fallback) {
+  const value = Number(serviceEnv(name, String(fallback)));
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`SERVICE_${name} or ${name} must be a positive integer`);
+  return value;
+}
+
+const serviceDatabases = Object.freeze({
+  gateway: 'college_erp_gateway', auth: 'college_erp_auth', profile: 'college_erp_profile',
+  academic: 'college_erp_academic', attendance: 'college_erp_attendance', marks: 'college_erp_marks',
+  paper: 'college_erp_paper', notification: 'college_erp_notification',
+});
+const configuredServiceName = optionalEnv('SERVICE_NAME', 'gateway');
 
 export const config = {
   nodeEnv: optionalEnv('NODE_ENV', 'development'),

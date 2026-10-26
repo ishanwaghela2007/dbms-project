@@ -4,10 +4,12 @@ import { randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { config } from '../src/config/env.js';
 
-const email = (process.env.ADMIN_EMAIL || 'admin@college.edu').trim();
-const password = process.env.ADMIN_PASSWORD || 'AdminPassword123!';
+const email = (process.env.ADMIN_EMAIL || '').trim();
+const password = process.env.ADMIN_PASSWORD || '';
 const fullName = process.env.ADMIN_NAME || 'CampusFlow Administrator';
-if (!email || !password || password.length < 8) throw new Error('Set ADMIN_EMAIL and a valid ADMIN_PASSWORD before seeding');
+if (!email || !password || password.length < 8 || password === 'AdminPassword123!') {
+  throw new Error('Set ADMIN_EMAIL and a valid, non-default ADMIN_PASSWORD before seeding');
+}
 const db=await mysql.createConnection(config.mysqlUrl ? { uri: config.mysqlUrl, ssl: config.mysqlSsl } : { host: config.mysqlHost, port: config.mysqlPort, user: config.mysqlUser, password: config.mysqlPassword, database: config.mysqlDatabase, ssl: config.mysqlSsl });
 try {
  const normalized=email.trim().toLowerCase(); const [rows]=await db.execute('SELECT id FROM users WHERE email=?',[normalized]);

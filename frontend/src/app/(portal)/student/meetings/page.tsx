@@ -14,10 +14,20 @@ function tone(status: Meeting["status"]): "success" | "warning" | "danger" | "in
   return "neutral";
 }
 
+interface AvailableSlot {
+  id: string;
+  teacherUserId: string;
+  startsAt: string;
+  endsAt: string;
+}
+
 export default function StudentMeetingsPage() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [selectedFollowupId, setSelectedFollowupId] = useState("");
+  const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
+  const [selectedSlotId, setSelectedSlotId] = useState("");
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const [teacherName, setTeacherName] = useState("");
   const [subject, setSubject] = useState("");
   const [meetingDate, setMeetingDate] = useState(() => new Date(Date.now() + 86400000).toISOString().slice(0, 10));
@@ -27,6 +37,32 @@ export default function StudentMeetingsPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+
+  async function loadSlots(fId: string) {
+    if (!fId) {
+      setAvailableSlots([]);
+      setSelectedSlotId("");
+      return;
+    }
+    setLoadingSlots(true);
+    try {
+      const slots = await apiRequest<AvailableSlot[]>(`/student/attendance-followups/${encodeURIComponent(fId)}/available-slots`);
+      setAvailableSlots(slots || []);
+      if (slots && slots.length > 0) {
+        setSelectedSlotId(slots[0].id);
+        const start = new Date(slots[0].startsAt);
+        setMeetingDate(start.toISOString().slice(0, 10));
+        setMeetingTime(`${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(slots[0].endsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      } else {
+        setSelectedSlotId("");
+      }
+    } catch {
+      setAvailableSlots([]);
+      setSelectedSlotId("");
+    } finally {
+      setLoadingSlots(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -41,6 +77,7 @@ export default function StudentMeetingsPage() {
         setSelectedFollowupId(followupList[0].id);
         setTeacherName(followupList[0].teacherName || followupList[0].contact || "Assigned Teacher");
         setSubject(followupList[0].subject || "Academic Course");
+        void loadSlots(followupList[0].id);
       }
     }).catch(e => {
       if (active) setError(e instanceof Error ? e.message : "Could not load meeting information.");
@@ -55,16 +92,35 @@ export default function StudentMeetingsPage() {
       setTeacherName(found.teacherName || found.contact || "Assigned Teacher");
       setSubject(found.subject || "Academic Course");
     }
+    void loadSlots(fId);
+  }
+
+  function handleSlotChange(slotId: string) {
+    setSelectedSlotId(slotId);
+    const found = availableSlots.find(s => s.id === slotId);
+    if (found) {
+      const start = new Date(found.startsAt);
+      setMeetingDate(start.toISOString().slice(0, 10));
+      setMeetingTime(`${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(found.endsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    }
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
     setNotice("");
+    if (!selectedFollowupId) {
+      setError("An attendance follow-up is required to request a meeting.");
+      return;
+    }
+    if (!selectedSlotId) {
+      setError("Please select an available faculty time slot.");
+      return;
+    }
     setSaving(true);
     try {
-      const targetFollowupId = selectedFollowupId || "attendance-review";
-      const response = await erpApi.requestMeeting(targetFollowupId, {
+      const response = await erpApi.requestMeeting(selectedFollowupId, {
+        slotId: selectedSlotId,
         teacherName,
         subject,
         date: meetingDate,
@@ -125,9 +181,9 @@ export default function StudentMeetingsPage() {
       <div className="page-two-col">
         <Card title="Request an appointment" subtitle="Enter your meeting details and preferred discussion topic.">
           <form className="stack" style={{ gap: 15 }} onSubmit={submit}>
-            {followups.length > 0 && (
+            {followups.length > 0 ? (
               <div className="field">
-                <label>Related attendance follow-up</label>
+                <label>Related attendance follow-up *</label>
                 <select value={selectedFollowupId} onChange={e => handleFollowupChange(e.target.value)}>
                   {followups.map(f => (
                     <option key={f.id} value={f.id}>
@@ -136,46 +192,44 @@ export default function StudentMeetingsPage() {
                   ))}
                 </select>
               </div>
+            ) : (
+              <p className="helper-text">You currently do not have any open attendance follow-ups requiring a scheduled meeting.</p>
             )}
+            <div className="field">
+              <label>Available faculty time slot *</label>
+              {loadingSlots ? (
+                <p className="helper-text">Loading available slots...</p>
+              ) : availableSlots.length > 0 ? (
+                <select value={selectedSlotId} onChange={e => handleSlotChange(e.target.value)}>
+                  {availableSlots.map(s => {
+                    const st = new Date(s.startsAt);
+                    const et = new Date(s.endsAt);
+                    const label = `${st.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} at ${st.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – ${et.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+                    return <option key={s.id} value={s.id}>{label}</option>;
+                  })}
+                </select>
+              ) : (
+                <p className="helper-text" style={{ color: "var(--danger, #dc2626)" }}>
+                  No open slots posted by faculty for this follow-up yet.
+                </p>
+              )}
+            </div>
             <div className="field-grid">
               <div className="field">
-                <label>Faculty member *</label>
+                <label>Faculty member</label>
                 <input
-                  required
                   value={teacherName}
                   onChange={e => setTeacherName(e.target.value)}
                   placeholder="e.g. Prof. Faculty Name"
                 />
               </div>
               <div className="field">
-                <label>Subject / course *</label>
+                <label>Subject / course</label>
                 <input
-                  required
                   value={subject}
                   onChange={e => setSubject(e.target.value)}
                   placeholder="e.g. Database Management Systems"
                 />
-              </div>
-            </div>
-            <div className="field-grid">
-              <div className="field">
-                <label>Preferred date *</label>
-                <input
-                  type="date"
-                  required
-                  value={meetingDate}
-                  onChange={e => setMeetingDate(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>Preferred time slot *</label>
-                <select value={meetingTime} onChange={e => setMeetingTime(e.target.value)}>
-                  <option>10:00 AM – 10:15 AM</option>
-                  <option>11:30 AM – 11:45 AM</option>
-                  <option>02:00 PM – 02:15 PM</option>
-                  <option>03:30 PM – 03:45 PM</option>
-                  <option>04:30 PM – 04:45 PM</option>
-                </select>
               </div>
             </div>
             <div className="field">
@@ -192,7 +246,7 @@ export default function StudentMeetingsPage() {
                 placeholder="What would you like to discuss with the teacher?"
               />
             </div>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || !selectedSlotId || followups.length === 0}>
               <Plus size={15} />
               {saving ? "Submitting…" : "Request meeting"}
             </Button>

@@ -16,7 +16,7 @@ export function getAvatarUrl(publicIdOrUrl: string | undefined | null): string |
   // If local backend upload fallback
   if (str.startsWith("local:")) {
     const clean = str.replace(/^local:/, "");
-    const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, "") || "http://localhost:4000";
+    const backendBase = (process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "https://college-erp-backend-gr0k.onrender.com/api/v1").replace(/\/api\/v1\/?$/, "");
     return `${backendBase}/api/v1/uploads/${clean}`;
   }
 

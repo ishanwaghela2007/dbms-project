@@ -21,7 +21,8 @@ const api = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: Math.max(1, config.maxUploadMb) * 1024 * 1024, files: 1 } });
 
 app.disable('x-powered-by');
-app.set('trust proxy', config.trustProxy !== false ? (config.trustProxy || 1) : 1);
+const tp = config.trustProxy;
+app.set('trust proxy', tp === false ? false : (/^\d+$/.test(String(tp)) ? Number(tp) : tp));
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const allowedFrontendOrigins = [...new Set([
   ...config.frontendOrigin.split(',').map((origin) => origin.trim()).filter(Boolean),
@@ -422,7 +423,9 @@ app.use((err,req,res,_next)=>{
   const status=Number(err.status)||(err.code==='ER_DUP_ENTRY'?409:err.code==='ER_NO_REFERENCED_ROW_2'?400:statusForGrpc(err.code))||500;
   const message=status>=500?(status===503?err.message:'Internal server error'):(err.publicMessage||err.message||'Request failed');
   if(status>=500) logger.error({requestId:req.requestId,err:err.message,stack:err.stack,grpcCode:err.code},'Gateway request failed');
-  res.status(status).json({error:message,code:err.codeName||'REQUEST_FAILED',requestId:req.requestId,details:err.details||err.message});
+  const body = { error: message, code: err.codeName || 'REQUEST_FAILED', requestId: req.requestId };
+  if (status < 500) body.details = err.details || err.message;
+  res.status(status).json(body);
 });
 
 const defaultPort = process.env.RENDER || config.nodeEnv === 'production' ? 10000 : 4000;

@@ -479,7 +479,7 @@ export default function PortalShell({ children }: { children: ReactNode }) {
                         role="option"
                         aria-selected={index === activeSearchIndex}
                         className={`search-result ${index === activeSearchIndex ? "search-result-active" : ""}`}
-                        key={item.href}
+                        key={`${item.href}-${item.label}`}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => chooseSearchResult(item)}
                         onMouseEnter={() => setActiveSearchIndex(index)}

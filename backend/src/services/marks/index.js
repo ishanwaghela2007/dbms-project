@@ -83,13 +83,18 @@ const handlers = {
     const { actorUserId, markId, assessmentId, studentUserId, marks } = input;
     if (!markId && (!assessmentId || !studentUserId)) throw badRequest('markId or (assessmentId and studentUserId) is required');
     let targetAssessmentId = assessmentId;
-    if (!targetAssessmentId && markId) {
+    if (markId) {
       const [m] = await pool.execute('SELECT assessment_id FROM marks WHERE id = ?', [markId]);
       if (!m[0]) throw notFound('Marks record not found');
+      if (targetAssessmentId && m[0].assessment_id !== targetAssessmentId) throw forbidden('Mark does not belong to this assessment');
       targetAssessmentId = m[0].assessment_id;
     }
     const { assessment } = await requireTeacherForAssessment(actorUserId, targetAssessmentId);
     if (assessment.status === 'PUBLISHED') throw forbidden('Published marks cannot be modified');
+    if (studentUserId) {
+      const roster = await rosterForAssessment(targetAssessmentId);
+      if (!roster.some(r => r.student_user_id === studentUserId)) throw badRequest('Student is not enrolled in the assessment class');
+    }
     return withTransaction(async conn => {
       return recordMarkWithAudit(conn, {
         markId,
@@ -187,6 +192,7 @@ const handlers = {
       if(key) submitted.set(String(key),row);
     }
     const itemRows=[];
+    const itemsToInsert=[];
     for(const student of roster){
       const entered=submitted.get(student.student_user_id)||submitted.get(student.roll_no);
       const found=findMarksForIdentifier(text,student.roll_no,Number(assessment.max_marks));
@@ -199,7 +205,12 @@ const handlers = {
       else if(Math.abs(found.marks-enteredMarks)<0.001) status='MATCH';
       else status='MISMATCH';
       const id=randomUUID();
-      await pool.execute(`INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,page_number,confidence,evidence_text,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,[id,job.id,student.student_user_id,student.roll_no,Number.isFinite(enteredMarks)?enteredMarks:null,found.marks,Number.isFinite(enteredMarks)?enteredMarks:null,found.pageNumber,found.confidence,found.evidence||null,status]);
+      itemsToInsert.push({
+        id, jobId: job.id, studentUserId: student.student_user_id, identifier: student.roll_no,
+        enteredMarks: Number.isFinite(enteredMarks)?enteredMarks:null, extractedMarks: found.marks,
+        finalMarks: Number.isFinite(enteredMarks)?enteredMarks:null, pageNumber: found.pageNumber,
+        confidence: found.confidence, evidence: found.evidence||null, status
+      });
       itemRows.push({id,studentUserId:student.student_user_id,studentName:student.full_name,rollNumber:student.roll_no,enteredMarks:Number.isFinite(enteredMarks)?enteredMarks:null,extractedMarks:found.marks,pageNumber:found.pageNumber,confidence:found.confidence,status,confirmed:false});
     }
     // Extra teacher-entered IDs not found in the roster are visible and must be mapped or removed by review.
@@ -207,10 +218,29 @@ const handlers = {
     for(const [key,row] of submitted.entries()){
       if(rosterKeys.has(key)) continue;
       const id=randomUUID(); const enteredMarks=Number(row.marksEntered);
-      await pool.execute(`INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,status) VALUES (?,?,NULL,?,?,NULL,?,'STUDENT_NOT_MATCHED')`,[id,job.id,String(row.rollNumber||row.rollNo||key).slice(0,100),Number.isFinite(enteredMarks)?enteredMarks:null,Number.isFinite(enteredMarks)?enteredMarks:null]);
+      itemsToInsert.push({
+        id, jobId: job.id, studentUserId: null, identifier: String(row.rollNumber||row.rollNo||key).slice(0,100),
+        enteredMarks: Number.isFinite(enteredMarks)?enteredMarks:null, extractedMarks: null,
+        finalMarks: Number.isFinite(enteredMarks)?enteredMarks:null, pageNumber: null,
+        confidence: 0, evidence: null, status: 'STUDENT_NOT_MATCHED'
+      });
       itemRows.push({id,studentUserId:null,studentName:null,rollNumber:String(row.rollNumber||row.rollNo||key),enteredMarks:Number.isFinite(enteredMarks)?enteredMarks:null,extractedMarks:null,pageNumber:null,confidence:0,status:'STUDENT_NOT_MATCHED',confirmed:false});
     }
-    await pool.execute(`UPDATE mark_validation_jobs SET status='NEEDS_REVIEW',extraction_mode=?,error_message=?,input_pdf=NULL,entered_rows_json=NULL,worker_locked_at=NULL,completed_at=UTC_TIMESTAMP() WHERE id=?`,[mode,mode==='FAILED'?'PDF text extraction was unavailable; manual review required':null,job.id]);
+
+    await withTransaction(async conn => {
+      await conn.execute('DELETE FROM mark_validation_items WHERE job_id = ?', [job.id]);
+      for (const it of itemsToInsert) {
+        await conn.execute(
+          `INSERT INTO mark_validation_items (id,job_id,student_user_id,identifier_from_pdf,entered_marks,extracted_marks,final_marks,page_number,confidence,evidence_text,status) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          [it.id, it.jobId, it.studentUserId, it.identifier, it.enteredMarks, it.extractedMarks, it.finalMarks, it.pageNumber, it.confidence, it.evidence, it.status]
+        );
+      }
+      await conn.execute(
+        `UPDATE mark_validation_jobs SET status='NEEDS_REVIEW',extraction_mode=?,error_message=?,input_pdf=NULL,entered_rows_json=NULL,worker_locked_at=NULL,completed_at=UTC_TIMESTAMP() WHERE id=?`,
+        [mode, mode==='FAILED'?'PDF text extraction was unavailable; manual review required':null, job.id]
+      );
+    });
+
     return {total:itemRows.length};
   },
   async publishResults(input) {

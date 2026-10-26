@@ -122,12 +122,9 @@ const handlers = {
       [programName, programName, programName, programName, programName, programName, programName, programName]
     );
 
-    let programId = programs[0]?.id;
+    const programId = programs[0]?.id;
     if (!programId) {
-      // Fallback to first available program
-      const [firstProg] = await pool.execute('SELECT id, name FROM programs LIMIT 1');
-      if (!firstProg[0]) throw notFound(`Program not found for: ${programName}`);
-      programId = firstProg[0].id;
+      throw notFound(`Program not found for: ${programName}`);
     }
 
     // Clean subject name & extract subject code if present
@@ -179,8 +176,8 @@ const handlers = {
     let [ayRows] = await pool.execute(
       `SELECT id, label FROM academic_years 
        WHERE REPLACE(REPLACE(label, '–', '-'), ' ', '')=? OR is_current=1 
-       ORDER BY is_current DESC LIMIT 1`,
-      [yearText]
+       ORDER BY (REPLACE(REPLACE(label, '–', '-'), ' ', '')=?) DESC, is_current DESC LIMIT 1`,
+      [yearText, yearText]
     );
 
     let academicYearId = ayRows[0]?.id;

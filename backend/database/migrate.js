@@ -67,20 +67,20 @@ try {
   const serverVersion = String(versionRows[0]?.ver || '');
   const isTiDB = /tidb/i.test(serverVersion) || config.mysqlPort === 4000 || process.env.SKIP_TRIGGERS === 'true';
 
+  // TiDB Cloud does not support triggers. Standard MySQL uses application-level audit logs.
+  // Drop legacy triggers if present to prevent double-auditing since application services write audit rows directly.
   if (isTiDB) {
-    console.log(`[TiDB Cloud Compatibility] TiDB detected (${serverVersion || 'port 4000'}). Database triggers are not supported in TiDB Cloud and have been refactored to backend services.`);
-    console.log('Skipping CREATE TRIGGER statements to preserve compatibility. Application-level validation & auditing are fully active.');
+    console.log(`[TiDB Cloud Compatibility] TiDB detected (${serverVersion || 'port 4000'}). Triggers skipped; application-level validation & auditing are fully active.`);
   } else {
-    // On traditional MySQL, optionally apply or drop triggers
-    try {
-      const triggers = await fs.readFile(new URL('./triggers.sql', import.meta.url), 'utf8');
-      const body = triggers.replace(/DELIMITER\s+\$\$/g, '').replace(/DELIMITER\s+;/g, '').replace(/^\s*USE\s+[a-zA-Z0-9_]+\s*;/i, '');
-      const statements = body.split('$$').map(s => s.trim()).filter(Boolean);
-      for (const statement of statements) await connection.query(statement);
-      console.log(`Applied ${statements.length} trigger statements on standard MySQL.`);
-    } catch (err) {
-      console.warn(`[Trigger Notice] Could not apply MySQL triggers (${err.message}). Application-level validation and auditing active.`);
+    const legacyTriggers = [
+      'trg_marks_before_insert', 'trg_marks_before_update',
+      'trg_marks_after_insert', 'trg_marks_after_update', 'trg_marks_after_delete',
+      'trg_appointment_status_audit', 'trg_user_security_audit', 'trg_user_security_insert'
+    ];
+    for (const trg of legacyTriggers) {
+      try { await connection.query(`DROP TRIGGER IF EXISTS ${trg}`); } catch {}
     }
+    console.log('Application-level audit logging and validation active; legacy duplicate triggers dropped.');
   }
 
   console.log('Migration complete: schemas and constraints applied successfully.');
