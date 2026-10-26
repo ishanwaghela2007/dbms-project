@@ -2,14 +2,16 @@
 /* eslint-disable @next/next/no-img-element -- The image preview uses a browser object URL before upload. */
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, Camera, CheckCircle2, Eye, EyeOff, KeyRound, Lock, ShieldCheck, UserRound, Wifi } from "lucide-react";
+import { Bell, Camera, CheckCircle2, Eye, EyeOff, KeyRound, Laptop, Lock, Moon, ShieldCheck, Sun, UserRound, Wifi } from "lucide-react";
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
+import { useTheme } from "@/lib/theme/theme-context";
 
 import { getAvatarUrl } from "@/lib/utils/avatar";
 
 export default function SettingsForm({ role }: { role: "admin" | "teacher" | "student" }) {
   const roleLabel = role === "student" ? "Student" : role === "teacher" ? "Faculty member" : "Administrator";
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -259,6 +261,55 @@ export default function SettingsForm({ role }: { role: "admin" | "teacher" | "st
         </Card>
 
         <div className="stack" style={{ gap: 18 }}>
+          <Card title="Appearance & theme" subtitle="Customize the interface color scheme. Takes system default by default.">
+            <div className="theme-selector-grid">
+              <button
+                type="button"
+                className={`theme-selector-card ${theme === "system" ? "active" : ""}`}
+                onClick={() => setTheme("system")}
+              >
+                <div className="theme-selector-card-icon">
+                  <Laptop size={20} />
+                </div>
+                <div className="theme-selector-card-content">
+                  <strong>System default</strong>
+                  <small>Follows your device OS theme ({resolvedTheme})</small>
+                </div>
+                {theme === "system" && <span className="theme-selector-pill">Active</span>}
+              </button>
+
+              <button
+                type="button"
+                className={`theme-selector-card ${theme === "light" ? "active" : ""}`}
+                onClick={() => setTheme("light")}
+              >
+                <div className="theme-selector-card-icon">
+                  <Sun size={20} />
+                </div>
+                <div className="theme-selector-card-content">
+                  <strong>Light mode</strong>
+                  <small>Crisp, high-contrast daylight theme</small>
+                </div>
+                {theme === "light" && <span className="theme-selector-pill">Active</span>}
+              </button>
+
+              <button
+                type="button"
+                className={`theme-selector-card ${theme === "dark" ? "active" : ""}`}
+                onClick={() => setTheme("dark")}
+              >
+                <div className="theme-selector-card-icon">
+                  <Moon size={20} />
+                </div>
+                <div className="theme-selector-card-content">
+                  <strong>Dark mode</strong>
+                  <small>Deep obsidian &amp; slate, easier on the eyes</small>
+                </div>
+                {theme === "dark" && <span className="theme-selector-pill">Active</span>}
+              </button>
+            </div>
+          </Card>
+
           <Card title="Notifications" subtitle="Choose which alerts appear in your workspace.">
             <div className="simple-list-item">
               <div className="stat-icon stat-icon-blue" style={{ width: 34, height: 34, margin: 0 }}>

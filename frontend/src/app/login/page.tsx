@@ -5,6 +5,7 @@ import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, GraduationCap, ShieldCheck, Sparkles } from "lucide-react";
 import { apiRequest } from "@/lib/api/client";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -169,7 +170,10 @@ export default function LoginPage() {
         <div className="login-story-footer">© 2026 CampusFlow ERP · Academic Workspace</div>
       </section>
 
-      <section className="login-form-side">
+      <section className="login-form-side" style={{ position: "relative" }}>
+        <div style={{ position: "absolute", top: 22, right: 24, zIndex: 10 }}>
+          <ThemeToggle />
+        </div>
         <form className="login-card" onSubmit={submit} autoComplete="off">
           <div className="login-mobile-brand">
             <span className="brand-mark">

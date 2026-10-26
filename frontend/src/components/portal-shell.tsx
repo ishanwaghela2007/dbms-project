@@ -8,6 +8,7 @@ import { erpApi } from "@/lib/api/erp";
 import { apiRequest } from "@/lib/api/client";
 import { fuzzySearch } from "@/lib/search/fuzzy";
 import { getAvatarUrl } from "@/lib/utils/avatar";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Activity, Bell, BookOpen, CalendarDays, ChevronDown, ChevronRight,
   CircleHelp, ClipboardCheck, FileCheck2, FileText, GraduationCap,
@@ -325,9 +326,9 @@ export default function PortalShell({ children }: { children: ReactNode }) {
 
   if (authStatus === "checking" || authStatus === "unauthorized") {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f8f9fc" }}>
-        <div style={{ width: 44, height: 44, borderRadius: "50%", border: "3px solid #e0e7ff", borderTopColor: "#4f46e5", animation: "spin 0.8s linear infinite" }} />
-        <p style={{ marginTop: 16, color: "#64748b", fontSize: "0.875rem", fontWeight: 500 }}>
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
+        <div style={{ width: 44, height: 44, borderRadius: "50%", border: "3px solid rgba(84,119,232,0.25)", borderTopColor: "var(--blue)", animation: "spin 0.8s linear infinite" }} />
+        <p style={{ marginTop: 16, color: "var(--muted)", fontSize: "0.875rem", fontWeight: 500 }}>
           {authStatus === "unauthorized" ? "Redirecting to institutional login…" : "Verifying access credentials…"}
         </p>
       </div>
@@ -341,12 +342,12 @@ export default function PortalShell({ children }: { children: ReactNode }) {
     ).toUpperCase();
     const destination = userRole === "ADMIN" ? "/admin" : userRole === "TEACHER" ? "/teacher" : "/student";
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f8f9fc", padding: 24, textAlign: "center" }}>
-        <div style={{ width: 68, height: 68, borderRadius: 20, background: "#fef2f2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, border: "1px solid #fee2e2" }}>
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 24, textAlign: "center" }}>
+        <div style={{ width: 68, height: 68, borderRadius: 20, background: "var(--red-soft)", color: "var(--red)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, border: "1px solid var(--line)" }}>
           <ShieldAlert size={34} />
         </div>
-        <h1 style={{ fontSize: "1.625rem", fontWeight: 700, color: "#0f172a", marginBottom: 8, letterSpacing: "-0.02em" }}>Access Restricted</h1>
-        <p style={{ color: "#64748b", maxWidth: 460, marginBottom: 24, fontSize: "0.9375rem", lineHeight: 1.5 }}>
+        <h1 style={{ fontSize: "1.625rem", fontWeight: 700, color: "var(--heading)", marginBottom: 8, letterSpacing: "-0.02em" }}>Access Restricted</h1>
+        <p style={{ color: "var(--muted)", maxWidth: 460, marginBottom: 24, fontSize: "0.9375rem", lineHeight: 1.5 }}>
           {forbiddenMessage || "You do not have the required role or authorization level to access this route."}
         </p>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
@@ -493,6 +494,7 @@ export default function PortalShell({ children }: { children: ReactNode }) {
                 </div>
               )}
             </div>
+            <ThemeToggle />
             <div className="notification-wrap">
               <button
                 className={`icon-button notification-button ${notificationsOpen ? "button-selected" : ""}`}
