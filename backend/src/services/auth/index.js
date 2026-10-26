@@ -181,7 +181,7 @@ const handlers = {
     await safeDelete(`authz:${actorUserId}`); await safeSet(`authz:version:${actorUserId}`, 'invalidated',{EX:86400});
     return { ok: true, message: 'Password changed successfully.' };
   },
-  async register({ fullName, email, password, accountType = 'STUDENT', departmentId, programId, enrollmentNo, employeeId, autoActivate = true, actorUserId }) {
+  async register({ fullName, email, password, accountType = 'STUDENT', departmentId, programId, enrollmentNo, employeeId, autoActivate = true, actorUserId, currentYear, currentSemester, division = 'A', designation = 'Assistant Professor' }) {
     if (actorUserId) {
       const [actors] = await pool.execute('SELECT is_admin, is_active FROM users WHERE id=? LIMIT 1', [actorUserId]);
       if (!actors[0] || !actors[0].is_active || !actors[0].is_admin) throw forbidden('Only an active administrator can register accounts');
@@ -208,21 +208,52 @@ const handlers = {
       [id, normalizedEmail, hash, String(fullName).trim(), type, activeVal]
     );
 
+    const branchDeptMap = {
+      'CSE': 'Computer Science and Engineering',
+      'CE': 'Computer Engineering',
+      'EXTC': 'Electronics and Telecommunication Engineering',
+      'IT': 'Information Technology',
+    };
+    const branchProgMap = {
+      'CSE': 'B.Tech Computer Science and Engineering',
+      'CE': 'B.Tech Computer Engineering',
+      'EXTC': 'B.Tech Electronics and Telecommunication Engineering',
+      'IT': 'B.Tech Information Technology',
+    };
+
     if (type === 'STUDENT') {
       try {
         const roll = enrollmentNo || `STU-${Date.now().toString().slice(-6)}`;
         let dept = departmentId;
         let prog = programId;
+
+        if (dept) {
+          const mappedName = branchDeptMap[String(dept).toUpperCase()] || dept;
+          const [d] = await pool.execute('SELECT id FROM departments WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR id=? LIMIT 1', [mappedName, mappedName, dept]);
+          dept = d[0]?.id || dept;
+        }
+        if (prog) {
+          const mappedProg = branchProgMap[String(prog).toUpperCase()] || prog;
+          const [p] = await pool.execute('SELECT id FROM programs WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR id=? LIMIT 1', [mappedProg, mappedProg, prog]);
+          prog = p[0]?.id || prog;
+        }
+
         if (!dept || !prog) {
           const [dRows] = await pool.execute('SELECT id FROM departments LIMIT 1');
           dept = dept || dRows[0]?.id;
           const [pRows] = await pool.execute('SELECT id FROM programs WHERE department_id=? LIMIT 1', [dept || '']);
           prog = prog || pRows[0]?.id;
         }
+
+        const semMatch = String(currentSemester || '1').match(/(\d+)/);
+        const sem = Number(semMatch?.[1] || 1);
+        const yr = Number(currentYear || Math.ceil(sem / 2) || 1);
+        const div = String(division || 'A').toUpperCase();
+
         if (dept && prog) {
           await pool.execute(
-            `INSERT INTO student_profiles (user_id, enrollment_no, department_id, program_id, admission_year, current_year, current_semester, division) VALUES (?, ?, ?, ?, ?, 1, 1, 'A')`,
-            [id, roll, dept, prog, new Date().getFullYear()]
+            `INSERT INTO student_profiles (user_id, enrollment_no, department_id, program_id, admission_year, current_year, current_semester, division) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, roll, dept, prog, new Date().getFullYear(), yr, sem, div]
           );
         }
       } catch (err) {
@@ -232,14 +263,19 @@ const handlers = {
       try {
         const emp = employeeId || `FAC-${Date.now().toString().slice(-6)}`;
         let dept = departmentId;
+        if (dept) {
+          const mappedName = branchDeptMap[String(dept).toUpperCase()] || dept;
+          const [d] = await pool.execute('SELECT id FROM departments WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR id=? LIMIT 1', [mappedName, mappedName, dept]);
+          dept = d[0]?.id || dept;
+        }
         if (!dept) {
           const [dRows] = await pool.execute('SELECT id FROM departments LIMIT 1');
           dept = dRows[0]?.id;
         }
         if (dept) {
           await pool.execute(
-            `INSERT INTO faculty_profiles (user_id, employee_id, department_id, designation) VALUES (?, ?, ?, 'Lecturer')`,
-            [id, emp, dept]
+            `INSERT INTO faculty_profiles (user_id, employee_id, department_id, designation) VALUES (?, ?, ?, ?)`,
+            [id, emp, dept, designation || 'Assistant Professor']
           );
         }
       } catch (err) {

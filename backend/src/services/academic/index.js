@@ -14,13 +14,49 @@ const handlers = {
   async resolveAcademicRefs(input) {
     if (!input.departmentName && !input.programName) throw badRequest('departmentName or programName required');
     let department = null; let program = null;
-    if (input.departmentName) { const [d] = await pool.execute('SELECT id,code,name FROM departments WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) LIMIT 1',[input.departmentName,input.departmentName]); department=d[0]||null; }
-    if (input.programName) { const [p] = await pool.execute('SELECT id,department_id,code,name FROM programs WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) LIMIT 1',[input.programName,input.programName]); program=p[0]||null; }
-    if (!department && program) { const [d] = await pool.execute('SELECT id,code,name FROM departments WHERE id=?',[program.department_id]); department=d[0]||null; }
-    if (program && department && program.department_id!==department.id) throw badRequest('Selected program does not belong to the requested department');
-    if (!department && input.departmentName) throw notFound(`Department not found: ${input.departmentName}`);
-    if (!program && input.programName) throw notFound(`Program not found: ${input.programName}`);
-    return { departmentId: department?.id || null, departmentName: department?.name || null, programId: program?.id || null, programName: program?.name || null };
+    const cleanStr = (s) => String(s || '').trim();
+    const deptInput = cleanStr(input.departmentName);
+    const progInput = cleanStr(input.programName);
+
+    // Map common branch codes
+    const branchMap = {
+      'CSE': { dept: 'Computer Science and Engineering', prog: 'B.Tech Computer Science and Engineering' },
+      'CE': { dept: 'Computer Engineering', prog: 'B.Tech Computer Engineering' },
+      'EXTC': { dept: 'Electronics and Telecommunication Engineering', prog: 'B.Tech Electronics and Telecommunication Engineering' },
+      'IT': { dept: 'Information Technology', prog: 'B.Tech Information Technology' },
+    };
+
+    const mappedDept = branchMap[deptInput.toUpperCase()]?.dept || deptInput;
+    const mappedProg = branchMap[progInput.toUpperCase()]?.prog || progInput;
+
+    if (mappedDept) {
+      const [d] = await pool.execute(
+        'SELECT id,code,name FROM departments WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR LOWER(name) LIKE ? LIMIT 1',
+        [mappedDept, mappedDept, `%${mappedDept}%`]
+      );
+      department = d[0] || null;
+    }
+    if (mappedProg) {
+      const [p] = await pool.execute(
+        'SELECT id,department_id,code,name FROM programs WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR LOWER(name) LIKE ? LIMIT 1',
+        [mappedProg, mappedProg, `%${mappedProg}%`]
+      );
+      program = p[0] || null;
+    }
+    if (!department && program) {
+      const [d] = await pool.execute('SELECT id,code,name FROM departments WHERE id=?', [program.department_id]);
+      department = d[0] || null;
+    }
+    if (!program && department) {
+      const [p] = await pool.execute('SELECT id,department_id,code,name FROM programs WHERE department_id=? LIMIT 1', [department.id]);
+      program = p[0] || null;
+    }
+    return {
+      departmentId: department?.id || null,
+      departmentName: department?.name || null,
+      programId: program?.id || null,
+      programName: program?.name || null
+    };
   },
   async autoEnrollStudent(input) {
     await requireAdmin(input.actorUserId);
@@ -36,19 +72,186 @@ const handlers = {
   },
   async resolveTeachingAssignment(input) {
     await requireAdmin(input.actorUserId);
-    const [teachers]=await pool.execute(`SELECT u.id,user_name.full_name FROM users u JOIN faculty_profiles fp ON fp.user_id=u.id JOIN (SELECT id,full_name FROM users) user_name ON user_name.id=u.id WHERE u.account_type='TEACHER' AND u.is_active=1 AND LOWER(u.full_name)=LOWER(?) LIMIT 1`,[input.teacherName]);
-    if(!teachers[0]) throw notFound(`Teacher not found: ${input.teacherName}`);
-    const [subjects]=await pool.execute('SELECT id,program_id,name FROM subjects WHERE LOWER(name)=LOWER(?) AND is_active=1 LIMIT 1',[input.subjectName]); if(!subjects[0]) throw notFound(`Subject not found: ${input.subjectName}`);
-    const classMatch=String(input.className||'').match(/^(FY|SY|TY|Final Year|First Year|Second Year|Third Year)\s+(.*?)\s*·\s*([A-Za-z0-9]+)$/i);
-    if(!classMatch) throw badRequest('className must look like "SY B.Tech CSE · A"');
-    const yrLabel=classMatch[1].toUpperCase(); const yearOfStudy=({FY:1,'FIRST YEAR':1,SY:2,'SECOND YEAR':2,TY:3,'THIRD YEAR':3,'FINAL YEAR':4})[yrLabel];
-    const programName=classMatch[2].trim(); const sectionName=classMatch[3].trim();
-    const semMatch=String(input.semester||'').match(/(\d+)/); if(!semMatch) throw badRequest('semester must include a semester number'); const semesterNumber=Number(semMatch[1]);
-    const [programs]=await pool.execute('SELECT id FROM programs WHERE LOWER(name)=LOWER(?) LIMIT 1',[programName]); if(!programs[0]) throw notFound(`Program not found: ${programName}`);
-    const yearText=String(input.year||'').replace(/[–—]/g,'-').replace(/\s/g,'');
-    const [classes]=await pool.execute(`SELECT cl.id classSectionId,cs.id classSubjectId,cs.academic_year_id academicYearId,s.id subjectId,ay.label academicYear FROM class_sections cl JOIN semesters sem ON sem.id=cl.semester_id JOIN academic_years ay ON ay.id=cl.academic_year_id JOIN class_subjects cs ON cs.class_section_id=cl.id JOIN subjects s ON s.id=cs.subject_id WHERE cl.program_id=? AND cl.year_of_study=? AND cl.section_name=? AND sem.semester_number=? AND s.id=? AND (REPLACE(REPLACE(ay.label,'–','-'),' ','')=? OR ay.is_current=1) ORDER BY ay.is_current DESC LIMIT 1`,[programs[0].id,yearOfStudy,sectionName,semesterNumber,subjects[0].id,yearText]);
-    if(!classes[0]) throw notFound('Matching class, semester, academic-year, and subject offering not found');
-    return {teacherUserId:teachers[0].id,...classes[0],subjectName:subjects[0].name};
+    const [teachers] = await pool.execute(
+      `SELECT u.id, u.full_name FROM users u 
+       JOIN faculty_profiles fp ON fp.user_id=u.id 
+       WHERE u.account_type='TEACHER' AND u.is_active=1 
+         AND (LOWER(u.full_name)=LOWER(?) OR LOWER(u.email)=LOWER(?) OR u.id=?) 
+       LIMIT 1`,
+      [input.teacherName, input.teacherName, input.teacherName]
+    );
+    if (!teachers[0]) throw notFound(`Teacher not found: ${input.teacherName}`);
+
+    // Parse semester number (1 through 8)
+    const semMatch = String(input.semester || '').match(/(\d+)/);
+    if (!semMatch) throw badRequest('semester must include a semester number (1 to 8)');
+    const semesterNumber = Number(semMatch[1]);
+    const inferredYear = Math.ceil(semesterNumber / 2) || 1;
+
+    // Parse class name e.g. "SY B.Tech Computer Science and Engineering · A"
+    const classMatch = String(input.className || '').match(/^(FY|SY|TY|Final Year|First Year|Second Year|Third Year|B\.Tech|Year\s*\d+)?\s*(.*?)\s*[·•-]\s*([A-Za-z0-9]+)$/i);
+    let yearOfStudy = inferredYear;
+    let programName = String(input.className || '').trim();
+    let sectionName = 'A';
+
+    if (classMatch) {
+      const yrLabel = (classMatch[1] || '').toUpperCase().trim();
+      if (yrLabel) {
+        yearOfStudy = ({
+          FY: 1, 'FIRST YEAR': 1, 'YEAR 1': 1,
+          SY: 2, 'SECOND YEAR': 2, 'YEAR 2': 2,
+          TY: 3, 'THIRD YEAR': 3, 'YEAR 3': 3,
+          'FINAL YEAR': 4, 'B.TECH': 4, 'YEAR 4': 4
+        })[yrLabel] || inferredYear;
+      }
+      programName = (classMatch[2] || '').trim();
+      sectionName = (classMatch[3] || 'A').toUpperCase().trim();
+    }
+
+    // Resolve Program with flexible alias matching
+    const [programs] = await pool.execute(
+      `SELECT id, name, code FROM programs 
+       WHERE LOWER(name)=LOWER(?) 
+          OR LOWER(code)=LOWER(?)
+          OR LOWER(name)=LOWER(CONCAT('B.Tech ', ?))
+          OR LOWER(REPLACE(name, 'B.Tech ', ''))=LOWER(REPLACE(?, 'B.Tech ', ''))
+          OR (LOWER(?) LIKE '%cse%' AND (LOWER(code) LIKE '%cse%' OR LOWER(name) LIKE '%computer science%'))
+          OR (LOWER(?) LIKE '%extc%' AND (LOWER(code) LIKE '%extc%' OR LOWER(name) LIKE '%telecom%'))
+          OR (LOWER(?) LIKE '%computer%' AND (LOWER(code) LIKE '%ce%' OR LOWER(name) LIKE '%computer engineering%'))
+       ORDER BY (LOWER(name)=LOWER(?)) DESC LIMIT 1`,
+      [programName, programName, programName, programName, programName, programName, programName, programName]
+    );
+
+    let programId = programs[0]?.id;
+    if (!programId) {
+      // Fallback to first available program
+      const [firstProg] = await pool.execute('SELECT id, name FROM programs LIMIT 1');
+      if (!firstProg[0]) throw notFound(`Program not found for: ${programName}`);
+      programId = firstProg[0].id;
+    }
+
+    // Clean subject name & extract subject code if present
+    let rawSubj = String(input.subjectName || '').trim();
+    let subjCode = '';
+    let cleanSubjName = rawSubj;
+
+    if (rawSubj.includes('·')) {
+      const parts = rawSubj.split('·');
+      subjCode = parts[0].trim();
+      cleanSubjName = parts[1].trim();
+    } else if (rawSubj.includes(' - ')) {
+      const parts = rawSubj.split(' - ');
+      subjCode = parts[0].trim();
+      cleanSubjName = parts[1].trim();
+    } else {
+      const codeMatch = rawSubj.match(/^([A-Za-z]{2,5}\d{3}[A-Za-z0-9/]*)\s+(.*)$/);
+      if (codeMatch) {
+        subjCode = codeMatch[1].trim();
+        cleanSubjName = codeMatch[2].trim();
+      }
+    }
+
+    // Resolve subject
+    let [subjects] = await pool.execute(
+      `SELECT id, program_id, name, code FROM subjects 
+       WHERE (LOWER(name)=LOWER(?) OR LOWER(name)=LOWER(?) OR (code=? AND code!='')) 
+         AND is_active=1 
+       ORDER BY (program_id=?) DESC LIMIT 1`,
+      [cleanSubjName, rawSubj, subjCode, programId]
+    );
+
+    let subjectId = subjects[0]?.id;
+    let resolvedSubjectName = subjects[0]?.name || cleanSubjName;
+
+    if (!subjectId) {
+      // Auto-create subject under program if not present
+      subjectId = randomUUID();
+      const codeToUse = subjCode || `SUB${semesterNumber}01`;
+      await pool.execute(
+        `INSERT INTO subjects (id, program_id, code, name, credits, is_active) VALUES (?, ?, ?, ?, 3, 1)`,
+        [subjectId, programId, codeToUse, cleanSubjName]
+      );
+      resolvedSubjectName = cleanSubjName;
+    }
+
+    // Resolve Academic Year
+    const yearText = String(input.year || '2026–27').replace(/[–—]/g, '-').replace(/\s/g, '');
+    let [ayRows] = await pool.execute(
+      `SELECT id, label FROM academic_years 
+       WHERE REPLACE(REPLACE(label, '–', '-'), ' ', '')=? OR is_current=1 
+       ORDER BY is_current DESC LIMIT 1`,
+      [yearText]
+    );
+
+    let academicYearId = ayRows[0]?.id;
+    let academicYearLabel = ayRows[0]?.label || '2026–27';
+    if (!academicYearId) {
+      academicYearId = randomUUID();
+      await pool.execute(
+        `INSERT INTO academic_years (id, label, starts_on, ends_on, is_current) VALUES (?, '2026–27', '2026-07-01', '2027-06-30', 1)`,
+        [academicYearId]
+      );
+    }
+
+    // Ensure Semester exists (1 to 8)
+    let [semRows] = await pool.execute(
+      `SELECT id FROM semesters WHERE program_id=? AND semester_number=? LIMIT 1`,
+      [programId, semesterNumber]
+    );
+    let semesterId = semRows[0]?.id;
+    if (!semesterId) {
+      semesterId = randomUUID();
+      await pool.execute(
+        `INSERT INTO semesters (id, program_id, semester_number, label) VALUES (?, ?, ?, ?)`,
+        [semesterId, programId, semesterNumber, `Semester ${semesterNumber}`]
+      );
+    }
+
+    // Ensure Class Section exists
+    let [secRows] = await pool.execute(
+      `SELECT id FROM class_sections 
+       WHERE program_id=? AND academic_year_id=? AND year_of_study=? AND semester_id=? AND section_name=? 
+       LIMIT 1`,
+      [programId, academicYearId, yearOfStudy, semesterId, sectionName]
+    );
+
+    let classSectionId = secRows[0]?.id;
+    if (!classSectionId) {
+      classSectionId = randomUUID();
+      await pool.execute(
+        `INSERT INTO class_sections (id, program_id, academic_year_id, year_of_study, semester_id, section_name) 
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [classSectionId, programId, academicYearId, yearOfStudy, semesterId, sectionName]
+      );
+    }
+
+    // Ensure Class Subject link exists
+    let [csRows] = await pool.execute(
+      `SELECT id FROM class_subjects 
+       WHERE class_section_id=? AND subject_id=? AND academic_year_id=? 
+       LIMIT 1`,
+      [classSectionId, subjectId, academicYearId]
+    );
+
+    let classSubjectId = csRows[0]?.id;
+    if (!classSubjectId) {
+      classSubjectId = randomUUID();
+      await pool.execute(
+        `INSERT INTO class_subjects (id, class_section_id, subject_id, academic_year_id) 
+         VALUES (?, ?, ?, ?)`,
+        [classSubjectId, classSectionId, subjectId, academicYearId]
+      );
+    }
+
+    return {
+      teacherUserId: teachers[0].id,
+      classSectionId,
+      classSubjectId,
+      academicYearId,
+      subjectId,
+      academicYear: academicYearLabel,
+      subjectName: resolvedSubjectName
+    };
   },
   async createDepartment(input) {
     await requireAdmin(input.actorUserId); if (!input.code || !input.name) throw badRequest('code and name are required');

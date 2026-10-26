@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -18,6 +18,20 @@ import {
 import { Button, Card, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
 
+export const branches = [
+  { id: "CSE", code: "BTECH-CSE", name: "Computer Science and Engineering", program: "B.Tech Computer Science and Engineering", department: "Computer Science and Engineering", short: "CSE" },
+  { id: "CE", code: "BTECH-CE", name: "Computer Engineering", program: "B.Tech Computer Engineering", department: "Computer Engineering", short: "COMPS" },
+  { id: "EXTC", code: "BTECH-EXTC", name: "Electronics and Telecommunication Engineering", program: "B.Tech Electronics and Telecommunication Engineering", department: "EXTC", short: "EXTC" },
+  { id: "IT", code: "BTECH-IT", name: "Information Technology", program: "B.Tech Information Technology", department: "Information Technology", short: "IT" },
+] as const;
+
+export const yearLevels = [
+  { id: "FY", label: "First Year (FY)", yearNumber: 1, semesters: ["Semester 1", "Semester 2"] },
+  { id: "SY", label: "Second Year (SY)", yearNumber: 2, semesters: ["Semester 3", "Semester 4"] },
+  { id: "TY", label: "Third Year (TY)", yearNumber: 3, semesters: ["Semester 5", "Semester 6"] },
+  { id: "Final Year", label: "Final Year (B.Tech)", yearNumber: 4, semesters: ["Semester 7", "Semester 8"] },
+] as const;
+
 export default function AdminRegisterPage() {
   const [accountType, setAccountType] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [fullName, setFullName] = useState("");
@@ -27,6 +41,17 @@ export default function AdminRegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [autoActivate, setAutoActivate] = useState(true);
+
+  // Student specific academic state
+  const [branch, setBranch] = useState("CSE");
+  const [yearLevel, setYearLevel] = useState("SY");
+  const [semester, setSemester] = useState("Semester 3");
+  const [division, setDivision] = useState("A");
+
+  // Faculty specific state
+  const [teacherDepartment, setTeacherDepartment] = useState("Computer Science and Engineering");
+  const [designation, setDesignation] = useState("Assistant Professor");
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -36,9 +61,14 @@ export default function AdminRegisterPage() {
     email: string;
     accountType: string;
     identifier: string;
+    academicInfo?: string;
     isActive: boolean;
     message?: string;
   } | null>(null);
+
+  const activeYearConfig = useMemo(() => {
+    return yearLevels.find((y) => y.id === yearLevel) || yearLevels[1];
+  }, [yearLevel]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -63,6 +93,12 @@ export default function AdminRegisterPage() {
         enrollmentNo?: string;
         employeeId?: string;
         autoActivate: boolean;
+        departmentId?: string;
+        programId?: string;
+        currentYear?: number;
+        currentSemester?: string;
+        division?: string;
+        designation?: string;
       } = {
         fullName: fullName.trim(),
         email: email.trim().toLowerCase(),
@@ -71,10 +107,27 @@ export default function AdminRegisterPage() {
         autoActivate,
       };
 
-      if (accountType === "STUDENT" && identifier.trim()) {
-        payload.enrollmentNo = identifier.trim().toUpperCase();
-      } else if (accountType === "TEACHER" && identifier.trim()) {
-        payload.employeeId = identifier.trim().toUpperCase();
+      let academicSummary = "";
+
+      if (accountType === "STUDENT") {
+        if (identifier.trim()) {
+          payload.enrollmentNo = identifier.trim().toUpperCase();
+        }
+        const bConf = branches.find((b) => b.id === branch) || branches[0];
+        const yConf = yearLevels.find((y) => y.id === yearLevel) || yearLevels[1];
+        payload.departmentId = bConf.department;
+        payload.programId = bConf.program;
+        payload.currentYear = yConf.yearNumber;
+        payload.currentSemester = semester;
+        payload.division = division;
+        academicSummary = `${bConf.short} · ${yearLevel} (${semester}) · Div ${division}`;
+      } else if (accountType === "TEACHER") {
+        if (identifier.trim()) {
+          payload.employeeId = identifier.trim().toUpperCase();
+        }
+        payload.departmentId = teacherDepartment;
+        payload.designation = designation;
+        academicSummary = `${teacherDepartment} · ${designation}`;
       }
 
       const res = await erpApi.register(payload);
@@ -84,6 +137,7 @@ export default function AdminRegisterPage() {
         email: res.email || email.trim().toLowerCase(),
         accountType,
         identifier: identifier.trim(),
+        academicInfo: academicSummary,
         isActive: res.isActive !== false,
         message: res.message,
       });
@@ -103,7 +157,7 @@ export default function AdminRegisterPage() {
 
   function copyCredentials() {
     if (!registeredUser) return;
-    const text = `CampusFlow Credentials:\nName: ${registeredUser.fullName}\nEmail: ${registeredUser.email}\nRole: ${registeredUser.accountType}\n${registeredUser.identifier ? `ID: ${registeredUser.identifier}\n` : ""}Status: ${registeredUser.isActive ? "Active (Can log in immediately)" : "Pending Email Verification"}`;
+    const text = `CampusFlow Credentials:\nName: ${registeredUser.fullName}\nEmail: ${registeredUser.email}\nRole: ${registeredUser.accountType}\n${registeredUser.identifier ? `ID: ${registeredUser.identifier}\n` : ""}${registeredUser.academicInfo ? `Academic: ${registeredUser.academicInfo}\n` : ""}Status: ${registeredUser.isActive ? "Active (Can log in immediately)" : "Pending Email Verification"}`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
@@ -114,7 +168,7 @@ export default function AdminRegisterPage() {
       <PageHeading
         eyebrow="CAMPUS ADMINISTRATION"
         title="Register user account"
-        description="Provision official institutional credentials for students or faculty members. Only logged-in administrators can create accounts."
+        description="Provision official institutional credentials with verified branch, year and academic role. Only authenticated administrators can create accounts."
         actions={
           <div style={{ display: "flex", gap: 10 }}>
             <Link className="btn btn-secondary btn-md" href="/admin/students">
@@ -148,56 +202,66 @@ export default function AdminRegisterPage() {
                   border: "2px solid #a7f3d0",
                 }}
               >
-                <CheckCircle2 size={28} />
+                <CheckCircle2 size={26} />
               </div>
               <div style={{ flex: 1 }}>
-                <h3 style={{ fontSize: 18, fontWeight: 700, color: "#111827", margin: "0 0 6px" }}>
+                <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 700, color: "var(--heading)" }}>
                   {registeredUser.fullName}
                 </h3>
-                <p style={{ color: "#4b5563", fontSize: 14, margin: "0 0 16px" }}>
-                  {registeredUser.message || "The user account is now active and ready for immediate login."}
+                <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--muted)" }}>
+                  {registeredUser.message || "Account is provisioned and ready for use."}
                 </p>
 
                 <div
                   style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
                     borderRadius: 8,
-                    padding: 16,
+                    padding: "12px 16px",
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
                     gap: 12,
-                    marginBottom: 20,
+                    marginBottom: 18,
                   }}
                 >
                   <div>
-                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 600 }}>
-                      Institutional Email
+                    <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>
+                      Email
                     </span>
-                    <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 14, marginTop: 2 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "var(--heading)", marginTop: 2 }}>
                       {registeredUser.email}
                     </div>
                   </div>
                   <div>
-                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 600 }}>
-                      Account Role
+                    <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>
+                      Role
                     </span>
-                    <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 14, marginTop: 2 }}>
-                      {registeredUser.accountType === "TEACHER" ? "Teacher / Faculty" : "Student"}
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "var(--heading)", marginTop: 2 }}>
+                      {registeredUser.accountType}
                     </div>
                   </div>
                   {registeredUser.identifier && (
                     <div>
-                      <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 600 }}>
-                        {registeredUser.accountType === "TEACHER" ? "Employee ID" : "Enrollment No."}
+                      <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>
+                        {registeredUser.accountType === "TEACHER" ? "Employee ID" : "Enrollment No"}
                       </span>
-                      <div style={{ fontWeight: 600, color: "#0f172a", fontSize: 14, marginTop: 2 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "var(--heading)", marginTop: 2 }}>
                         {registeredUser.identifier}
                       </div>
                     </div>
                   )}
+                  {registeredUser.academicInfo && (
+                    <div>
+                      <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>
+                        Branch / Department
+                      </span>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "var(--heading)", marginTop: 2 }}>
+                        {registeredUser.academicInfo}
+                      </div>
+                    </div>
+                  )}
                   <div>
-                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", fontWeight: 600 }}>
+                    <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>
                       Status
                     </span>
                     <div style={{ marginTop: 2 }}>
@@ -231,15 +295,14 @@ export default function AdminRegisterPage() {
           <div className="content-grid" style={{ gridTemplateColumns: "1fr" }}>
             <Card
               title="Admin account provisioning"
-              subtitle="Register a student or faculty account with institutional permissions."
+              subtitle="Register a student or faculty account with verified branch and semester."
               action={<StatusPill tone="info">Admin only</StatusPill>}
             >
               <form onSubmit={submit} className="stack" style={{ gap: 20 }}>
                 <div className="notice notice-info">
                   <ShieldCheck size={18} />
                   <div>
-                    <strong>Administrator-controlled registration:</strong> Public self-registration is disabled.
-                    Students and teachers receive their login credentials directly from the administration.
+                    <strong>Administrator-controlled registration:</strong> Select whether you are creating a Student or Faculty account, along with their academic branch and semester.
                   </div>
                 </div>
 
@@ -302,10 +365,91 @@ export default function AdminRegisterPage() {
                     />
                   </div>
 
-                  <div className="field">
-                    <label>Account status & activation</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#374151" }}>
+                  {accountType === "STUDENT" ? (
+                    <>
+                      <div className="field">
+                        <label>Branch / Engineering department *</label>
+                        <select value={branch} onChange={(e) => setBranch(e.target.value)}>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.short} · {b.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="field">
+                        <label>Year of study *</label>
+                        <select
+                          value={yearLevel}
+                          onChange={(e) => {
+                            const yr = e.target.value;
+                            const yConf = yearLevels.find((y) => y.id === yr) || yearLevels[0];
+                            setYearLevel(yr);
+                            setSemester(yConf.semesters[0]);
+                          }}
+                        >
+                          {yearLevels.map((y) => (
+                            <option key={y.id} value={y.id}>
+                              {y.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="field">
+                        <label>Semester (Only {yearLevel}) *</label>
+                        <select value={semester} onChange={(e) => setSemester(e.target.value)}>
+                          {activeYearConfig.semesters.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="field-hint">Showing only semesters belonging to {yearLevel}</span>
+                      </div>
+
+                      <div className="field">
+                        <label>Division *</label>
+                        <select value={division} onChange={(e) => setDivision(e.target.value)}>
+                          <option value="A">Division A</option>
+                          <option value="B">Division B</option>
+                          <option value="C">Division C</option>
+                        </select>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="field">
+                        <label>Department / Engineering branch *</label>
+                        <select
+                          value={teacherDepartment}
+                          onChange={(e) => setTeacherDepartment(e.target.value)}
+                        >
+                          <option value="Computer Science and Engineering">Computer Science and Engineering (CSE)</option>
+                          <option value="Computer Engineering">Computer Engineering (COMPS)</option>
+                          <option value="Electronics and Telecommunication Engineering">Electronics and Telecommunication (EXTC)</option>
+                          <option value="Information Technology">Information Technology (IT)</option>
+                        </select>
+                      </div>
+
+                      <div className="field">
+                        <label>Designation *</label>
+                        <select value={designation} onChange={(e) => setDesignation(e.target.value)}>
+                          <option value="Assistant Professor">Assistant Professor</option>
+                          <option value="Associate Professor">Associate Professor</option>
+                          <option value="Professor">Professor</option>
+                          <option value="Lecturer">Lecturer</option>
+                          <option value="Head of Department">Head of Department</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="field" style={{ gridColumn: "1/-1" }}>
+                    <label>Account status &amp; activation</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "var(--heading)" }}>
                         <input
                           type="checkbox"
                           checked={autoActivate}
@@ -359,7 +503,9 @@ export default function AdminRegisterPage() {
 
                 <div className="button-row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
                   <Button type="submit" disabled={busy} size="md">
-                    {busy ? "Registering user…" : (
+                    {busy ? (
+                      "Registering user…"
+                    ) : (
                       <>
                         <UserCheck size={16} /> Register {accountType === "TEACHER" ? "Teacher" : "Student"} Account
                       </>

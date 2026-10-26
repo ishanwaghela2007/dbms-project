@@ -77,7 +77,7 @@ export const erpApi = {
     apiRequest<{ ok: boolean; message: string }>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
   resetPassword: (token: string, password: string) =>
     apiRequest<{ ok: boolean; message: string }>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) }),
-  register: (payload: { fullName: string; email: string; password: string; accountType?: string; departmentId?: string; programId?: string; enrollmentNo?: string; employeeId?: string; autoActivate?: boolean }) =>
+  register: (payload: { fullName: string; email: string; password: string; accountType?: string; departmentId?: string; programId?: string; enrollmentNo?: string; employeeId?: string; autoActivate?: boolean; currentYear?: number; currentSemester?: string | number; division?: string; designation?: string }) =>
     apiRequest<{ success: boolean; message: string; email: string; isActive?: boolean }>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
   verifyEmail: (token: string) =>
     apiRequest<{ success: boolean; message: string; email?: string; fullName?: string }>("/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) }),
