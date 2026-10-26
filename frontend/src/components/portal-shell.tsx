@@ -9,6 +9,7 @@ import { apiRequest } from "@/lib/api/client";
 import { fuzzySearch } from "@/lib/search/fuzzy";
 import { getAvatarUrl } from "@/lib/utils/avatar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ApplePageMotion } from "@/components/apple-page-motion";
 import {
   Activity, Bell, BookOpen, CalendarDays, ChevronDown, ChevronRight,
   CircleHelp, ClipboardCheck, FileCheck2, FileText, GraduationCap,
@@ -450,9 +451,15 @@ export default function PortalShell({ children }: { children: ReactNode }) {
             <div className="breadcrumb"><span>CampusFlow</span><ChevronRight size={14} /><strong>{pageTitle}</strong></div>
           </div>
           <div className="topbar-actions">
-            <div className="search-command">
-              <label className="global-search">
-                <Search size={17} />
+            <div className={`search-command ${searchOpen ? "search-command-open" : ""}`}>
+              <label
+                className="global-search"
+                onClick={() => {
+                  setSearchOpen(true);
+                  searchInput.current?.focus();
+                }}
+              >
+                <Search size={17} className="search-icon-svg" />
                 <input
                   ref={searchInput}
                   value={search}
@@ -467,6 +474,22 @@ export default function PortalShell({ children }: { children: ReactNode }) {
                   aria-expanded={searchOpen && Boolean(search.trim())}
                 />
                 <kbd>⌘ K</kbd>
+                {searchOpen && (
+                  <button
+                    type="button"
+                    aria-label="Close search"
+                    className="search-mobile-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setSearch("");
+                      setSearchOpen(false);
+                      searchInput.current?.blur();
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </label>
               {searchOpen && search.trim() && (
                 <div className="search-results" id="global-search-results" role="listbox" aria-label="Search results">
@@ -601,7 +624,9 @@ export default function PortalShell({ children }: { children: ReactNode }) {
             </button>
           </div>
         </header>
-        <div className="page-content">{children}</div>
+        <div className="page-content">
+          <ApplePageMotion>{children}</ApplePageMotion>
+        </div>
         <footer className="app-footer"><span>© 2026 CampusFlow ERP</span><span><span className="footer-dot" style={{ background: "#10b981" }} /> Live Backend Connected</span><span>Made for better campus experiences</span></footer>
       </main>
     </div>

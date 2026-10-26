@@ -310,7 +310,7 @@ export default function AdminRegisterPage() {
                   <label style={{ fontWeight: 600, marginBottom: 8, display: "block" }}>
                     Select account type *
                   </label>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
                     <button
                       type="button"
                       className={`btn ${accountType === "STUDENT" ? "btn-primary" : "btn-secondary"} btn-md`}
