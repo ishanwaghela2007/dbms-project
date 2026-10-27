@@ -206,6 +206,7 @@ api.post('/admin/students', authenticate, requireAdmin, wrap(async(req,res)=>{
 }));
 api.get('/admin/students/:id', authenticate, requireAdmin, wrap(async(req,res)=>res.json(formatStudent(await rpcHttp(clients.profile,'getStudent',{actorUserId:req.auth.userId,studentId:req.params.id})))));
 api.patch('/admin/students/:id', authenticate, requireAdmin, wrap(async(req,res)=>res.json(formatStudent(await rpcHttp(clients.profile,'updateStudent',{...req.body,actorUserId:req.auth.userId,studentId:req.params.id})))));
+api.delete('/admin/students/:id', authenticate, requireAdmin, wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'deleteStudent',{actorUserId:req.auth.userId,studentId:req.params.id}))));
 api.get('/admin/teachers', authenticate, requireAdmin, wrap(async(req,res)=>{
   const r=await rpcHttp(clients.profile,'listTeachers',{actorUserId:req.auth.userId,search:req.query.search||'',departmentId:req.query.departmentId,page:req.query.page||1,pageSize:req.query.pageSize||100}); res.json(items(r).map(formatTeacher));
 }));
@@ -216,6 +217,7 @@ api.post('/admin/teachers', authenticate, requireAdmin, wrap(async(req,res)=>{
 }));
 api.get('/admin/teachers/:id', authenticate, requireAdmin, wrap(async(req,res)=>res.json(formatTeacher(await rpcHttp(clients.profile,'getTeacher',{actorUserId:req.auth.userId,teacherId:req.params.id})))));
 api.patch('/admin/teachers/:id', authenticate, requireAdmin, wrap(async(req,res)=>res.json(formatTeacher(await rpcHttp(clients.profile,'updateTeacher',{...req.body,actorUserId:req.auth.userId,teacherId:req.params.id})))));
+api.delete('/admin/teachers/:id', authenticate, requireAdmin, wrap(async(req,res)=>res.json(await rpcHttp(clients.profile,'deleteTeacher',{actorUserId:req.auth.userId,teacherId:req.params.id}))));
 
 // Admin academic master data and teaching allocations.
 api.get('/admin/departments', authenticate, requireAdmin, wrap(async(req,res)=>res.json(items(await rpcHttp(clients.academic,'listDepartments',{actorUserId:req.auth.userId})))));

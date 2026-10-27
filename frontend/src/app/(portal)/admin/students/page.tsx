@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Download, Filter, Plus, Search, SlidersHorizontal, UserRoundCheck, Users, X } from "lucide-react";
+import { AlertTriangle, Download, Filter, Plus, Search, SlidersHorizontal, Trash2, UserRoundCheck, Users, X } from "lucide-react";
 import { Button, PageHeading, StatusPill } from "@/components/ui";
 import { erpApi } from "@/lib/api/erp";
 import type { Student } from "@/types/erp";
@@ -26,8 +26,25 @@ export default function StudentsPage() {
   const [selectedBranch, setSelectedBranch] = useState("All branches");
   const [selectedYear, setSelectedYear] = useState("All years");
   const [modalOpen, setModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState("");
   const [saving, setSaving] = useState(false);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await erpApi.deleteStudent(deleteTarget.id);
+      setRows(prev => prev.filter(s => s.id !== deleteTarget.id));
+      setToast(`Student account for ${deleteTarget.name} removed permanently.`);
+      setDeleteTarget(null);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Failed to remove student account.");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const [form, setForm] = useState({
     name: "",
@@ -193,6 +210,7 @@ export default function StudentsPage() {
               <th>Semester</th>
               <th>Attendance</th>
               <th>Account</th>
+              <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -220,6 +238,18 @@ export default function StudentsPage() {
                 </div>
               </td>
               <td><StatusPill tone={s.status === "Active" ? "success" : "neutral"}>{s.status}</StatusPill></td>
+              <td style={{ textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="icon-button"
+                  style={{ color: "#ef4444", background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.2)", padding: "6px 8px", borderRadius: "8px", cursor: "pointer", transition: "all 0.15s ease" }}
+                  onClick={() => setDeleteTarget(s)}
+                  title={`Remove account of ${s.name}`}
+                  aria-label={`Remove account of ${s.name}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </td>
             </tr>)}
           </tbody>
         </table>
@@ -316,6 +346,62 @@ export default function StudentsPage() {
               <Button type="submit" disabled={saving}>{saving?"Creating…":"Create student"}</Button>
             </div>
           </form>
+        </div>
+      </div>
+    )}
+
+    {deleteTarget && (
+      <div className="modal-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setDeleteTarget(null);}}>
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="delete-student-title" style={{maxWidth:480}}>
+          <div className="modal-header">
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:36,height:36,borderRadius:10,background:"rgba(239, 68, 68, 0.12)",color:"#ef4444",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <AlertTriangle size={20}/>
+              </div>
+              <div>
+                <h2 id="delete-student-title" style={{color:"#ef4444"}}>Remove student account</h2>
+                <p>This action is irreversible and requires administrator privilege.</p>
+              </div>
+            </div>
+            <button className="icon-button" onClick={()=>setDeleteTarget(null)} aria-label="Close dialog">
+              <X size={19}/>
+            </button>
+          </div>
+          <div className="stack" style={{gap:16,padding:"4px 0"}}>
+            <p style={{fontSize:13,lineHeight:1.6,color:"var(--heading)"}}>
+              Are you sure you want to permanently delete the account for <strong>{deleteTarget.name}</strong> ({deleteTarget.rollNo || deleteTarget.email})?
+            </p>
+            <div className="notice" style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",color:"var(--heading)",fontSize:12}}>
+              This will remove all associated student records, course enrollments, attendance history, marks entries, and auth credentials from the database.
+            </div>
+            <div className="button-row" style={{justifyContent:"flex-end",marginTop:10}}>
+              <Button type="button" variant="secondary" onClick={()=>setDeleteTarget(null)} disabled={deleting}>
+                Cancel
+              </Button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{
+                  background: "#ef4444",
+                  color: "#ffffff",
+                  border: "none",
+                  padding: "9px 18px",
+                  borderRadius: "10px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: deleting ? "not-allowed" : "pointer",
+                  opacity: deleting ? 0.7 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  boxShadow: "0 4px 12px rgba(239, 68, 68, 0.25)"
+                }}
+              >
+                <Trash2 size={15}/> {deleting ? "Removing…" : "Permanently remove account"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     )}

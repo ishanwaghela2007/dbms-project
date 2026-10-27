@@ -27,10 +27,12 @@ service ProfileService {
   rpc GetStudent(JsonRequest) returns (JsonResponse);
   rpc CreateStudent(JsonRequest) returns (JsonResponse);
   rpc UpdateStudent(JsonRequest) returns (JsonResponse);
+  rpc DeleteStudent(JsonRequest) returns (JsonResponse);
   rpc ListTeachers(JsonRequest) returns (JsonResponse);
   rpc GetTeacher(JsonRequest) returns (JsonResponse);
   rpc CreateTeacher(JsonRequest) returns (JsonResponse);
   rpc UpdateTeacher(JsonRequest) returns (JsonResponse);
+  rpc DeleteTeacher(JsonRequest) returns (JsonResponse);
   rpc UpdateAvatar(JsonRequest) returns (JsonResponse);
 }
 service AcademicService {

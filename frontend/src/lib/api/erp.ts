@@ -32,8 +32,12 @@ export const erpApi = {
   listTeacherMeetings: () => apiRequest<Meeting[]>("/teacher/meetings"),
   createStudent: (payload: Partial<Student>) =>
     apiRequest<Student>("/admin/students", { method: "POST", body: JSON.stringify(payload) }),
+  deleteStudent: (id: string) =>
+    apiRequest<{ success?: boolean; message?: string }>(`/admin/students/${encodeURIComponent(id)}`, { method: "DELETE" }),
   createTeacher: (payload: Partial<Teacher>) =>
     apiRequest<Teacher>("/admin/teachers", { method: "POST", body: JSON.stringify(payload) }),
+  deleteTeacher: (id: string) =>
+    apiRequest<{ success?: boolean; message?: string }>(`/admin/teachers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   saveAttendance: (payload: unknown) =>
     apiRequest<{ ok: boolean; message: string }>("/teacher/attendance/sessions", { method: "POST", body: JSON.stringify(payload) }),
   previewMarksPdf: (form: FormData) =>

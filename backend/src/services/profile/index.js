@@ -161,6 +161,80 @@ const handlers = {
     if (typeof input.isActive === 'boolean') await safeDelete(`authz:${studentId}`);
     return handlers.getStudent({ actorUserId: input.actorUserId, studentId });
   },
+  async deleteStudent({ actorUserId, studentId }) {
+    await assertAdmin(actorUserId);
+    if (!studentId) throw badRequest('studentId is required');
+
+    const [target] = await pool.execute('SELECT id, full_name, email, account_type, is_admin FROM users WHERE id=?', [studentId]);
+    if (!target[0]) throw notFound('Student not found');
+    if (target[0].is_admin) throw forbidden('Cannot delete admin account');
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // 1. Audit logs & appointments
+      await conn.execute(`
+        DELETE al FROM appointment_audit_logs al
+        JOIN appointments a ON a.id = al.appointment_id
+        WHERE a.student_user_id = ?
+      `, [studentId]);
+
+      await conn.execute('DELETE FROM appointments WHERE student_user_id = ?', [studentId]);
+
+      // 2. Attendance followups & linked appointments/logs
+      await conn.execute(`
+        DELETE al FROM appointment_audit_logs al
+        JOIN appointments a ON a.id = al.appointment_id
+        JOIN student_attendance_followups f ON f.id = a.followup_id
+        WHERE f.student_user_id = ?
+      `, [studentId]);
+      await conn.execute('DELETE FROM appointments WHERE followup_id IN (SELECT id FROM student_attendance_followups WHERE student_user_id = ?)', [studentId]);
+      await conn.execute('DELETE FROM student_attendance_followups WHERE student_user_id = ?', [studentId]);
+
+      // 3. Attendance records and audit logs
+      await conn.execute('DELETE FROM attendance_audit_logs WHERE student_user_id = ?', [studentId]);
+      await conn.execute('DELETE FROM attendance_records WHERE student_user_id = ?', [studentId]);
+
+      // 4. Marks and marks audit logs
+      await conn.execute('DELETE FROM marks_audit_logs WHERE student_user_id = ?', [studentId]);
+      await conn.execute('DELETE FROM marks WHERE student_user_id = ?', [studentId]);
+
+      // 5. Validation job errors
+      await conn.execute('DELETE FROM mark_validation_job_errors WHERE student_user_id = ?', [studentId]);
+
+      // 6. Enrollments
+      await conn.execute('DELETE FROM enrollments WHERE student_user_id = ?', [studentId]);
+
+      // 7. Notifications & Outbox
+      await conn.execute('DELETE FROM student_notifications WHERE recipient_user_id = ?', [studentId]);
+      await conn.execute('DELETE FROM notification_outbox_events WHERE recipient_user_id = ?', [studentId]);
+
+      // 8. Auth tokens and security logs
+      await conn.execute('DELETE FROM user_invitations WHERE user_id = ?', [studentId]);
+      await conn.execute('DELETE FROM email_verifications WHERE user_id = ?', [studentId]);
+      await conn.execute('DELETE FROM user_security_audit_logs WHERE user_id = ?', [studentId]);
+
+      // 9. Profile and media assets
+      await conn.execute('DELETE FROM student_profiles WHERE user_id = ?', [studentId]);
+      await conn.execute('DELETE FROM media_assets WHERE owner_user_id = ?', [studentId]);
+
+      // 10. User
+      await conn.execute('DELETE FROM users WHERE id = ?', [studentId]);
+
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      logger.error({ err: err.message, studentId }, 'Failed to delete student account');
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+    await safeDelete(`authz:${studentId}`);
+    await safeDelete(`authz:version:${studentId}`);
+    return { success: true, message: `Student ${target[0].full_name} (${target[0].email}) deleted successfully`, id: studentId };
+  },
   async listTeachers({ actorUserId, search = '', departmentId, page = 1, pageSize = 25 }) {
     await assertAdmin(actorUserId);
     await ensureProfilesExist();
@@ -254,6 +328,95 @@ const handlers = {
     if (typeof input.isActive === 'boolean') await safeDelete(`authz:${input.teacherId}`);
     const [updated] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,fp.*,d.name department FROM users u JOIN faculty_profiles fp ON fp.user_id=u.id JOIN departments d ON d.id=fp.department_id WHERE u.id=?`, [input.teacherId]);
     return updated[0];
+  },
+  async deleteTeacher({ actorUserId, teacherId }) {
+    await assertAdmin(actorUserId);
+    if (!teacherId) throw badRequest('teacherId is required');
+    if (actorUserId === teacherId) throw forbidden('Cannot delete your own account');
+
+    const [target] = await pool.execute('SELECT id, full_name, email, account_type, is_admin FROM users WHERE id=?', [teacherId]);
+    if (!target[0]) throw notFound('Teacher not found');
+    if (target[0].is_admin) throw forbidden('Cannot delete admin account');
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // 1. Audit logs & appointments for this teacher
+      await conn.execute(`
+        DELETE al FROM appointment_audit_logs al
+        JOIN appointments a ON a.id = al.appointment_id
+        WHERE a.teacher_user_id = ?
+      `, [teacherId]);
+      await conn.execute('DELETE FROM appointments WHERE teacher_user_id = ?', [teacherId]);
+
+      // 2. Availability slots
+      await conn.execute('DELETE FROM teacher_availability_slots WHERE teacher_user_id = ?', [teacherId]);
+
+      // 3. Reassign or clean followups assigned to this teacher
+      const [otherFaculty] = await conn.execute('SELECT user_id FROM faculty_profiles WHERE user_id != ? LIMIT 1', [teacherId]);
+      if (otherFaculty[0]?.user_id) {
+        await conn.execute('UPDATE student_attendance_followups SET contact_teacher_user_id = ? WHERE contact_teacher_user_id = ?', [otherFaculty[0].user_id, teacherId]);
+      } else {
+        await conn.execute(`
+          DELETE al FROM appointment_audit_logs al
+          JOIN appointments a ON a.id = al.appointment_id
+          JOIN student_attendance_followups f ON f.id = a.followup_id
+          WHERE f.contact_teacher_user_id = ?
+        `, [teacherId]);
+        await conn.execute('DELETE FROM appointments WHERE followup_id IN (SELECT id FROM student_attendance_followups WHERE contact_teacher_user_id = ?)', [teacherId]);
+        await conn.execute('DELETE FROM student_attendance_followups WHERE contact_teacher_user_id = ?', [teacherId]);
+      }
+
+      // 4. Teaching assignments
+      await conn.execute('DELETE FROM teaching_assignments WHERE teacher_user_id = ?', [teacherId]);
+
+      // 5. Jobs
+      await conn.execute('DELETE FROM attendance_import_jobs WHERE teacher_user_id = ?', [teacherId]);
+      await conn.execute('DELETE FROM mark_validation_jobs WHERE teacher_user_id = ?', [teacherId]);
+
+      // 6. Reassign references in assessments, attendance, marks, papers, followups, audit
+      await conn.execute('UPDATE assessments SET created_by_user_id = ? WHERE created_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE attendance_sessions SET marked_by_user_id = ? WHERE marked_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE attendance_records SET marked_by_user_id = ? WHERE marked_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE marks SET entered_by_user_id = ? WHERE entered_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE marks SET updated_by_user_id = ? WHERE updated_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE papers SET uploaded_by_user_id = ? WHERE uploaded_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE student_attendance_followups SET tagged_by_user_id = ? WHERE tagged_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE teaching_assignments SET assigned_by_user_id = ? WHERE assigned_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE marks_audit_logs SET changed_by_user_id = ? WHERE changed_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE attendance_audit_logs SET changed_by_user_id = ? WHERE changed_by_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE appointment_audit_logs SET actor_user_id = ? WHERE actor_user_id = ?', [actorUserId, teacherId]);
+      await conn.execute('UPDATE appointments SET updated_by_user_id = ? WHERE updated_by_user_id = ?', [actorUserId, teacherId]);
+
+      // 7. Notifications & Outbox
+      await conn.execute('DELETE FROM student_notifications WHERE recipient_user_id = ?', [teacherId]);
+      await conn.execute('DELETE FROM notification_outbox_events WHERE recipient_user_id = ?', [teacherId]);
+
+      // 8. Auth tokens & security logs
+      await conn.execute('DELETE FROM user_invitations WHERE user_id = ?', [teacherId]);
+      await conn.execute('DELETE FROM email_verifications WHERE user_id = ?', [teacherId]);
+      await conn.execute('DELETE FROM user_security_audit_logs WHERE user_id = ?', [teacherId]);
+
+      // 9. Profile & media assets
+      await conn.execute('DELETE FROM faculty_profiles WHERE user_id = ?', [teacherId]);
+      await conn.execute('DELETE FROM media_assets WHERE owner_user_id = ?', [teacherId]);
+
+      // 10. User
+      await conn.execute('DELETE FROM users WHERE id = ?', [teacherId]);
+
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      logger.error({ err: err.message, teacherId }, 'Failed to delete teacher account');
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+    await safeDelete(`authz:${teacherId}`);
+    await safeDelete(`authz:version:${teacherId}`);
+    return { success: true, message: `Teacher ${target[0].full_name} (${target[0].email}) deleted successfully`, id: teacherId };
   },
   async getMyProfile({ actorUserId }) {
     let uRows;
