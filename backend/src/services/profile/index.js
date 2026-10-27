@@ -13,22 +13,99 @@ async function assertAdmin(actorUserId) {
   if (!rows[0] || !rows[0].is_active || !rows[0].is_admin) throw forbidden('Admin access required');
 }
 
+async function ensureProfilesExist() {
+  try {
+    const [dRows] = await pool.execute('SELECT id FROM departments ORDER BY id ASC LIMIT 1');
+    const [pRows] = await pool.execute('SELECT id FROM programs ORDER BY id ASC LIMIT 1');
+    const defaultDeptId = dRows[0]?.id;
+    const defaultProgId = pRows[0]?.id;
+    if (defaultDeptId && defaultProgId) {
+      await pool.execute(`
+        INSERT INTO student_profiles (user_id, enrollment_no, department_id, program_id, admission_year, current_year, current_semester, division)
+        SELECT u.id,
+               CONCAT('STU-', UPPER(SUBSTRING(REPLACE(u.id, '-', ''), 1, 6))),
+               ?, ?, YEAR(CURRENT_DATE()), 1, 1, 'A'
+        FROM users u
+        LEFT JOIN student_profiles sp ON sp.user_id = u.id
+        WHERE u.account_type = 'STUDENT' AND sp.user_id IS NULL
+      `, [defaultDeptId, defaultProgId]);
+    }
+    if (defaultDeptId) {
+      await pool.execute(`
+        INSERT INTO faculty_profiles (user_id, employee_id, department_id, designation)
+        SELECT u.id,
+               CONCAT('FAC-', UPPER(SUBSTRING(REPLACE(u.id, '-', ''), 1, 6))),
+               ?, 'Assistant Professor'
+        FROM users u
+        LEFT JOIN faculty_profiles fp ON fp.user_id = u.id
+        WHERE u.account_type = 'TEACHER' AND fp.user_id IS NULL
+      `, [defaultDeptId]);
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'ensureProfilesExist background check failed');
+  }
+}
+
 const handlers = {
   async listStudents({ actorUserId, search = '', departmentId, page = 1, pageSize = 25 }) {
     await assertAdmin(actorUserId);
+    await ensureProfilesExist();
     const p = Math.max(1, Number(page) || 1); const n = Math.min(100, Math.max(1, Number(pageSize) || 25));
     const filters = ['u.account_type=\'STUDENT\'']; const args = [];
-    if (search) { filters.push('(u.full_name LIKE ? OR u.email LIKE ? OR sp.enrollment_no LIKE ?)'); args.push(like(search), like(search), like(search)); }
+    if (search) { filters.push('(u.full_name LIKE ? OR u.email LIKE ? OR COALESCE(sp.enrollment_no, \'\') LIKE ?)'); args.push(like(search), like(search), like(search)); }
     if (departmentId) { filters.push('sp.department_id = ?'); args.push(departmentId); }
     const where = filters.join(' AND ');
-    const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM users u JOIN student_profiles sp ON sp.user_id=u.id WHERE ${where}`, args);
-    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,sp.enrollment_no,sp.department_id,sp.program_id,d.name department,p.name program,sp.admission_year,sp.current_year,sp.current_semester,sp.division,sp.phone,sp.avatar_public_id,attendance.attendance_percent,attendance.attendance_sessions FROM users u JOIN student_profiles sp ON sp.user_id=u.id JOIN departments d ON d.id=sp.department_id JOIN programs p ON p.id=sp.program_id LEFT JOIN (SELECT ar.student_user_id,COUNT(*) attendance_sessions,ROUND(100.0*SUM(CASE WHEN ar.status IN ('PRESENT','LATE') THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0),2) attendance_percent FROM attendance_records ar JOIN attendance_sessions ses ON ses.id=ar.session_id AND ses.status='FINALIZED' WHERE ar.status IN ('PRESENT','ABSENT','LATE') GROUP BY ar.student_user_id) attendance ON attendance.student_user_id=u.id WHERE ${where} ORDER BY u.full_name LIMIT ${n} OFFSET ${(p - 1) * n}`, args);
+    const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM users u LEFT JOIN student_profiles sp ON sp.user_id=u.id WHERE ${where}`, args);
+    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,
+      COALESCE(sp.enrollment_no, CONCAT('STU-', SUBSTRING(u.id, 1, 8))) AS enrollment_no,
+      sp.department_id,
+      sp.program_id,
+      COALESCE(d.name, 'General') AS department,
+      COALESCE(p.name, 'General Degree') AS program,
+      COALESCE(sp.admission_year, YEAR(u.created_at)) AS admission_year,
+      COALESCE(sp.current_year, 1) AS current_year,
+      COALESCE(sp.current_semester, 1) AS current_semester,
+      COALESCE(sp.division, 'A') AS division,
+      sp.phone,
+      sp.avatar_public_id,
+      attendance.attendance_percent,
+      attendance.attendance_sessions
+    FROM users u
+    LEFT JOIN student_profiles sp ON sp.user_id=u.id
+    LEFT JOIN departments d ON d.id=sp.department_id
+    LEFT JOIN programs p ON p.id=sp.program_id
+    LEFT JOIN (
+      SELECT ar.student_user_id,
+             COUNT(*) AS attendance_sessions,
+             ROUND(100.0 * SUM(CASE WHEN ar.status IN ('PRESENT','LATE') THEN 1 ELSE 0 END) / NULLIF(COUNT(*),0), 2) AS attendance_percent
+      FROM attendance_records ar
+      JOIN attendance_sessions ses ON ses.id=ar.session_id AND ses.status='FINALIZED'
+      WHERE ar.status IN ('PRESENT','ABSENT','LATE')
+      GROUP BY ar.student_user_id
+    ) attendance ON attendance.student_user_id=u.id
+    WHERE ${where}
+    ORDER BY u.created_at DESC, u.full_name ASC
+    LIMIT ${n} OFFSET ${(p - 1) * n}`, args);
     return { items: rows, page: p, pageSize: n, total: Number(countRows[0].total) };
   },
   async getStudent({ actorUserId, studentId }) {
     const [actorRows] = await pool.execute('SELECT id,is_admin,is_active FROM users WHERE id=?', [actorUserId]);
     if (!actorRows[0] || !actorRows[0].is_active || (!actorRows[0].is_admin && actorUserId !== studentId)) throw forbidden('Cannot view another student profile');
-    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,sp.*,d.name department,p.name program FROM users u JOIN student_profiles sp ON sp.user_id=u.id JOIN departments d ON d.id=sp.department_id JOIN programs p ON p.id=sp.program_id WHERE u.id=?`, [studentId]);
+    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,
+      COALESCE(sp.enrollment_no, CONCAT('STU-', SUBSTRING(u.id, 1, 8))) AS enrollment_no,
+      sp.department_id, sp.program_id,
+      COALESCE(d.name, 'General') AS department,
+      COALESCE(p.name, 'General Degree') AS program,
+      COALESCE(sp.admission_year, YEAR(u.created_at)) AS admission_year,
+      COALESCE(sp.current_year, 1) AS current_year,
+      COALESCE(sp.current_semester, 1) AS current_semester,
+      COALESCE(sp.division, 'A') AS division,
+      sp.phone, sp.date_of_birth, sp.address, sp.avatar_public_id
+    FROM users u
+    LEFT JOIN student_profiles sp ON sp.user_id=u.id
+    LEFT JOIN departments d ON d.id=sp.department_id
+    LEFT JOIN programs p ON p.id=sp.program_id
+    WHERE u.id=?`, [studentId]);
     if (!rows[0]) throw notFound('Student not found'); return rows[0];
   },
   async createStudent(input) {
@@ -37,7 +114,12 @@ const handlers = {
     if (!enrollmentNo || !departmentId || !programId) throw badRequest('enrollmentNo, departmentId, and programId are required');
     const user = await rpc(authClient, 'createUser', { actorUserId: input.actorUserId, fullName, email, password, accountType: 'STUDENT', isAdmin: false });
     try {
-      await pool.execute(`INSERT INTO student_profiles (user_id,enrollment_no,department_id,program_id,admission_year,current_year,current_semester,division,phone,date_of_birth,address) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [user.id, enrollmentNo, departmentId, programId, input.admissionYear || null, input.currentYear || null, input.currentSemester || null, input.division || null, input.phone || null, input.dateOfBirth || null, input.address || null]);
+      await pool.execute(
+        `INSERT INTO student_profiles (user_id,enrollment_no,department_id,program_id,admission_year,current_year,current_semester,division,phone,date_of_birth,address)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE enrollment_no=VALUES(enrollment_no), department_id=VALUES(department_id), program_id=VALUES(program_id), current_year=VALUES(current_year), current_semester=VALUES(current_semester), division=VALUES(division)`,
+        [user.id, enrollmentNo, departmentId, programId, input.admissionYear || new Date().getFullYear(), input.currentYear || 1, input.currentSemester || 1, input.division || 'A', input.phone || null, input.dateOfBirth || null, input.address || null]
+      );
       return { ...user, enrollmentNo, departmentId, programId };
     } catch (err) {
       try { await rpc(authClient, 'updateUserStatus', { actorUserId: input.actorUserId, userId: user.id, isActive: false }); } catch {}
@@ -77,24 +159,49 @@ const handlers = {
       await conn.commit();
     } catch (err) { await conn.rollback(); throw err; } finally { conn.release(); }
     if (typeof input.isActive === 'boolean') await safeDelete(`authz:${studentId}`);
-    const [updated] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,sp.*,d.name department,p.name program FROM users u JOIN student_profiles sp ON sp.user_id=u.id JOIN departments d ON d.id=sp.department_id JOIN programs p ON p.id=sp.program_id WHERE u.id=?`, [studentId]);
-    return updated[0];
+    return handlers.getStudent({ actorUserId: input.actorUserId, studentId });
   },
   async listTeachers({ actorUserId, search = '', departmentId, page = 1, pageSize = 25 }) {
     await assertAdmin(actorUserId);
+    await ensureProfilesExist();
     const p = Math.max(1, Number(page) || 1); const n = Math.min(100, Math.max(1, Number(pageSize) || 25));
     const filters = ['u.account_type=\'TEACHER\'']; const args = [];
-    if (search) { filters.push('(u.full_name LIKE ? OR u.email LIKE ? OR fp.employee_id LIKE ?)'); args.push(like(search), like(search), like(search)); }
+    if (search) { filters.push('(u.full_name LIKE ? OR u.email LIKE ? OR COALESCE(fp.employee_id, \'\') LIKE ?)'); args.push(like(search), like(search), like(search)); }
     if (departmentId) { filters.push('fp.department_id = ?'); args.push(departmentId); }
     const where = filters.join(' AND ');
-    const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM users u JOIN faculty_profiles fp ON fp.user_id=u.id WHERE ${where}`, args);
-    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,fp.employee_id,fp.department_id,d.name department,fp.designation,fp.qualification,fp.specialization,fp.joining_date,fp.phone,fp.office_location,fp.avatar_public_id FROM users u JOIN faculty_profiles fp ON fp.user_id=u.id JOIN departments d ON d.id=fp.department_id WHERE ${where} ORDER BY u.full_name LIMIT ${n} OFFSET ${(p - 1) * n}`, args);
+    const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM users u LEFT JOIN faculty_profiles fp ON fp.user_id=u.id WHERE ${where}`, args);
+    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,
+      COALESCE(fp.employee_id, CONCAT('FAC-', SUBSTRING(u.id, 1, 8))) AS employee_id,
+      fp.department_id,
+      COALESCE(d.name, 'General') AS department,
+      COALESCE(fp.designation, 'Faculty Member') AS designation,
+      fp.qualification,
+      fp.specialization,
+      fp.joining_date,
+      fp.phone,
+      fp.office_location,
+      fp.avatar_public_id
+    FROM users u
+    LEFT JOIN faculty_profiles fp ON fp.user_id=u.id
+    LEFT JOIN departments d ON d.id=fp.department_id
+    WHERE ${where}
+    ORDER BY u.created_at DESC, u.full_name ASC
+    LIMIT ${n} OFFSET ${(p - 1) * n}`, args);
     return { items: rows, page: p, pageSize: n, total: Number(countRows[0].total) };
   },
   async getTeacher({ actorUserId, teacherId }) {
     const [actorRows] = await pool.execute('SELECT id,account_type,is_admin,is_active FROM users WHERE id=?', [actorUserId]);
     if (!actorRows[0] || !actorRows[0].is_active || (!actorRows[0].is_admin && actorUserId !== teacherId)) throw forbidden('Cannot view another teacher profile');
-    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,fp.*,d.name department FROM users u JOIN faculty_profiles fp ON fp.user_id=u.id JOIN departments d ON d.id=fp.department_id WHERE u.id=?`, [teacherId]);
+    const [rows] = await pool.execute(`SELECT u.id,u.email,u.full_name,u.is_active,
+      COALESCE(fp.employee_id, CONCAT('FAC-', SUBSTRING(u.id, 1, 8))) AS employee_id,
+      fp.department_id,
+      COALESCE(d.name, 'General') AS department,
+      COALESCE(fp.designation, 'Faculty Member') AS designation,
+      fp.qualification, fp.specialization, fp.joining_date, fp.phone, fp.office_location, fp.avatar_public_id
+    FROM users u
+    LEFT JOIN faculty_profiles fp ON fp.user_id=u.id
+    LEFT JOIN departments d ON d.id=fp.department_id
+    WHERE u.id=?`, [teacherId]);
     if (!rows[0]) throw notFound('Teacher not found');
     const [assignments] = await pool.execute(`SELECT ta.id,ta.class_subject_id,cs.class_section_id,cs.subject_id,s.code subject_code,s.name subject_name,cl.section_name,cl.year_of_study,sem.semester_number FROM teaching_assignments ta JOIN class_subjects cs ON cs.id=ta.class_subject_id JOIN subjects s ON s.id=cs.subject_id JOIN class_sections cl ON cl.id=cs.class_section_id JOIN semesters sem ON sem.id=cl.semester_id WHERE ta.teacher_user_id=? AND ta.status='ACTIVE'`, [teacherId]);
     return { ...rows[0], assignments };
@@ -105,7 +212,12 @@ const handlers = {
     if (!employeeId || !departmentId) throw badRequest('employeeId and departmentId are required');
     const user = await rpc(authClient, 'createUser', { actorUserId: input.actorUserId, fullName, email, password, accountType: 'TEACHER', isAdmin: false });
     try {
-      await pool.execute(`INSERT INTO faculty_profiles (user_id,employee_id,department_id,designation,qualification,specialization,joining_date,phone,office_location) VALUES (?,?,?,?,?,?,?,?,?)`, [user.id, employeeId, departmentId, input.designation || null, input.qualification || null, input.specialization || null, input.joiningDate || null, input.phone || null, input.officeLocation || null]);
+      await pool.execute(
+        `INSERT INTO faculty_profiles (user_id,employee_id,department_id,designation,qualification,specialization,joining_date,phone,office_location)
+         VALUES (?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE employee_id=VALUES(employee_id), department_id=VALUES(department_id), designation=VALUES(designation)`,
+        [user.id, employeeId, departmentId, input.designation || 'Assistant Professor', input.qualification || null, input.specialization || null, input.joiningDate || null, input.phone || null, input.officeLocation || null]
+      );
       return { ...user, employeeId, departmentId };
     } catch (err) { try { await rpc(authClient, 'updateUserStatus', { actorUserId: input.actorUserId, userId: user.id, isActive: false }); } catch {} throw err; }
   },

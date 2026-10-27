@@ -38,6 +38,7 @@ export async function sendMail({ to, subject, html, text }) {
     const rawFrom = process.env.SMTP_FROM || (process.env.SMTP_USER ? `"CampusFlow ERP" <${process.env.SMTP_USER}>` : '"CampusFlow ERP" <no-reply@college.edu>');
     const from = String(rawFrom).replace(/^['"]|['"]$/g, '').trim();
 
+    const transport = await getTransporter();
     const info = await transport.sendMail({
       from,
       to,

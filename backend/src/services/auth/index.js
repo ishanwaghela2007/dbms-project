@@ -226,25 +226,46 @@ const handlers = {
     if (type === 'STUDENT') {
       try {
         const roll = enrollmentNo || `STU-${Date.now().toString().slice(-6)}`;
-        let dept = departmentId;
-        let prog = programId;
-
-        if (dept) {
-          const mappedName = branchDeptMap[String(dept).toUpperCase()] || dept;
-          const [d] = await pool.execute('SELECT id FROM departments WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR id=? LIMIT 1', [mappedName, mappedName, dept]);
-          dept = d[0]?.id || dept;
+        let resolvedDeptId = null;
+        if (departmentId) {
+          const rawDept = String(departmentId).trim();
+          const mappedName = branchDeptMap[rawDept.toUpperCase()] || rawDept;
+          const [d] = await pool.execute(
+            'SELECT id FROM departments WHERE id = ? OR LOWER(code) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?) LIMIT 1',
+            [rawDept, rawDept, mappedName, `%${mappedName}%`]
+          );
+          if (d[0]?.id) resolvedDeptId = d[0].id;
         }
-        if (prog) {
-          const mappedProg = branchProgMap[String(prog).toUpperCase()] || prog;
-          const [p] = await pool.execute('SELECT id FROM programs WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR id=? LIMIT 1', [mappedProg, mappedProg, prog]);
-          prog = p[0]?.id || prog;
+        if (!resolvedDeptId) {
+          const [dRows] = await pool.execute('SELECT id FROM departments ORDER BY id ASC LIMIT 1');
+          resolvedDeptId = dRows[0]?.id || null;
+        }
+        if (!resolvedDeptId) {
+          resolvedDeptId = randomUUID();
+          await pool.execute('INSERT INTO departments (id, code, name) VALUES (?, ?, ?)', [resolvedDeptId, 'CSE', 'Computer Science and Engineering']);
         }
 
-        if (!dept || !prog) {
-          const [dRows] = await pool.execute('SELECT id FROM departments LIMIT 1');
-          dept = dept || dRows[0]?.id;
-          const [pRows] = await pool.execute('SELECT id FROM programs WHERE department_id=? LIMIT 1', [dept || '']);
-          prog = prog || pRows[0]?.id;
+        let resolvedProgId = null;
+        if (programId) {
+          const rawProg = String(programId).trim();
+          const mappedProg = branchProgMap[rawProg.toUpperCase()] || rawProg;
+          const [p] = await pool.execute(
+            'SELECT id FROM programs WHERE id = ? OR LOWER(code) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?) LIMIT 1',
+            [rawProg, rawProg, mappedProg, `%${mappedProg}%`]
+          );
+          if (p[0]?.id) resolvedProgId = p[0].id;
+        }
+        if (!resolvedProgId && resolvedDeptId) {
+          const [pRows] = await pool.execute('SELECT id FROM programs WHERE department_id = ? LIMIT 1', [resolvedDeptId]);
+          resolvedProgId = pRows[0]?.id || null;
+        }
+        if (!resolvedProgId) {
+          const [pAny] = await pool.execute('SELECT id FROM programs ORDER BY id ASC LIMIT 1');
+          resolvedProgId = pAny[0]?.id || null;
+        }
+        if (!resolvedProgId) {
+          resolvedProgId = randomUUID();
+          await pool.execute('INSERT INTO programs (id, department_id, code, name, duration_years) VALUES (?, ?, ?, ?, 4)', [resolvedProgId, resolvedDeptId, 'BTECH-CSE', 'B.Tech Computer Science and Engineering']);
         }
 
         const semMatch = String(currentSemester || '1').match(/(\d+)/);
@@ -252,36 +273,45 @@ const handlers = {
         const yr = Number(currentYear || Math.ceil(sem / 2) || 1);
         const div = String(division || 'A').toUpperCase();
 
-        if (dept && prog) {
-          await pool.execute(
-            `INSERT INTO student_profiles (user_id, enrollment_no, department_id, program_id, admission_year, current_year, current_semester, division) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, roll, dept, prog, new Date().getFullYear(), yr, sem, div]
-          );
-        }
+        await pool.execute(
+          `INSERT INTO student_profiles (user_id, enrollment_no, department_id, program_id, admission_year, current_year, current_semester, division)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE enrollment_no=VALUES(enrollment_no), department_id=VALUES(department_id), program_id=VALUES(program_id), current_year=VALUES(current_year), current_semester=VALUES(current_semester), division=VALUES(division)`,
+          [id, roll, resolvedDeptId, resolvedProgId, new Date().getFullYear(), yr, sem, div]
+        );
       } catch (err) {
-        logger.warn({ err: err.message }, 'Could not create initial student profile during self-registration');
+        logger.error({ err: err.message }, 'Could not create initial student profile during registration');
       }
     } else if (type === 'TEACHER') {
       try {
         const emp = employeeId || `FAC-${Date.now().toString().slice(-6)}`;
-        let dept = departmentId;
-        if (dept) {
-          const mappedName = branchDeptMap[String(dept).toUpperCase()] || dept;
-          const [d] = await pool.execute('SELECT id FROM departments WHERE LOWER(name)=LOWER(?) OR LOWER(code)=LOWER(?) OR id=? LIMIT 1', [mappedName, mappedName, dept]);
-          dept = d[0]?.id || dept;
-        }
-        if (!dept) {
-          const [dRows] = await pool.execute('SELECT id FROM departments LIMIT 1');
-          dept = dRows[0]?.id;
-        }
-        if (dept) {
-          await pool.execute(
-            `INSERT INTO faculty_profiles (user_id, employee_id, department_id, designation) VALUES (?, ?, ?, ?)`,
-            [id, emp, dept, designation || 'Assistant Professor']
+        let resolvedDeptId = null;
+        if (departmentId) {
+          const rawDept = String(departmentId).trim();
+          const mappedName = branchDeptMap[rawDept.toUpperCase()] || rawDept;
+          const [d] = await pool.execute(
+            'SELECT id FROM departments WHERE id = ? OR LOWER(code) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(name) LIKE LOWER(?) LIMIT 1',
+            [rawDept, rawDept, mappedName, `%${mappedName}%`]
           );
+          if (d[0]?.id) resolvedDeptId = d[0].id;
         }
+        if (!resolvedDeptId) {
+          const [dRows] = await pool.execute('SELECT id FROM departments ORDER BY id ASC LIMIT 1');
+          resolvedDeptId = dRows[0]?.id || null;
+        }
+        if (!resolvedDeptId) {
+          resolvedDeptId = randomUUID();
+          await pool.execute('INSERT INTO departments (id, code, name) VALUES (?, ?, ?)', [resolvedDeptId, 'CSE', 'Computer Science and Engineering']);
+        }
+
+        await pool.execute(
+          `INSERT INTO faculty_profiles (user_id, employee_id, department_id, designation)
+           VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE employee_id=VALUES(employee_id), department_id=VALUES(department_id), designation=VALUES(designation)`,
+          [id, emp, resolvedDeptId, designation || 'Assistant Professor']
+        );
       } catch (err) {
-        logger.warn({ err: err.message }, 'Could not create initial faculty profile during self-registration');
+        logger.error({ err: err.message }, 'Could not create initial faculty profile during registration');
       }
     }
 
@@ -300,11 +330,14 @@ const handlers = {
     sendVerificationMail({ to: normalizedEmail, fullName: String(fullName).trim(), verifyUrl }).catch(err => logger.warn({ err: err.message }, 'Direct verification mail failed'));
 
     return {
+      id,
+      fullName: String(fullName).trim(),
+      accountType: type,
+      email: normalizedEmail,
       success: true,
       message: activeVal === 1
         ? `Account for ${String(fullName).trim()} created and activated successfully.`
         : 'Registration successful! We have sent an email verification link to your email address.',
-      email: normalizedEmail,
       isActive: activeVal === 1,
       ...(process.env.NODE_ENV === 'production' ? {} : { verificationToken, verifyUrl })
     };
